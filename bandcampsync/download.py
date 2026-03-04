@@ -1,5 +1,7 @@
 import math
+import re
 import shutil
+from urllib.parse import unquote
 from zipfile import ZipFile
 from bs4 import BeautifulSoup
 from curl_cffi import requests
@@ -74,6 +76,29 @@ def _read_html_body(response):
     return html_body
 
 
+def _parse_content_disposition_filename(header_value):
+    """Parse filename from a Content-Disposition header value.
+
+    Handles quoted, unquoted, and RFC 5987 UTF-8 encoded forms.
+    Returns the filename string or None if not found.
+    """
+    if not header_value:
+        return None
+    # Try RFC 5987 filename* first (e.g. filename*=UTF-8''Artist%20-%20Album.zip)
+    match = re.search(r"filename\*\s*=\s*UTF-8''(.+?)(?:;|$)", header_value, re.IGNORECASE)
+    if match:
+        return unquote(match.group(1).strip())
+    # Try quoted filename (e.g. filename="Artist - Album.zip")
+    match = re.search(r'filename\s*=\s*"(.+?)"', header_value)
+    if match:
+        return match.group(1).strip()
+    # Try unquoted filename (e.g. filename=Artist - Album.zip)
+    match = re.search(r"filename\s*=\s*([^;]+)", header_value)
+    if match:
+        return match.group(1).strip()
+    return None
+
+
 def download_file(
     url,
     target,
@@ -90,6 +115,7 @@ def download_file(
     text = True if "t" in mode else False
     data_streamed = 0
     last_log = 0
+    content_filename = None
     r = requests.get(url, stream=True, impersonate="chrome")
     try:
         # r.raise_for_status()
@@ -109,6 +135,11 @@ def download_file(
                 f"Invalid content type: {major_content_type}"
             )
         try:
+            cd_header = r.headers.get("Content-Disposition", "")
+        except (ValueError, KeyError):
+            cd_header = ""
+        content_filename = _parse_content_disposition_filename(cd_header)
+        try:
             content_length = int(r.headers.get("Content-Length", "0"))
         except (ValueError, KeyError):
             content_length = 0
@@ -124,7 +155,7 @@ def download_file(
                     last_log = percent_complete
     finally:
         r.close()
-    return True
+    return content_filename
 
 
 def is_zip_file(file_path):

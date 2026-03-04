@@ -40,6 +40,7 @@ if __name__ == '__main__':
     retry_wait_env = os.getenv('RETRY_WAIT', '5')
     concurrency_env = os.getenv('CONCURRENCY', '1')
     skip_item_index_env = os.getenv('SKIP_ITEM_INDEX', False)
+    dir_format_env = os.getenv('DIR_FORMAT', 'artist-album')
     try:
         max_retries = int(max_retries_env)
     except (ValueError, TypeError):
@@ -56,6 +57,7 @@ if __name__ == '__main__':
         skip_item_index = bool(skip_item_index_env)
     except (ValueError, TypeError):
         skip_item_index = False
+    dir_format = dir_format_env if dir_format_env in ('artist-album', 'zip') else 'artist-album'
 
 
     cookies_path = Path(cookies_path_env).resolve()
@@ -104,7 +106,7 @@ if __name__ == '__main__':
     try:
         while not catch_shutdown.shutdown:
             log.info(f'Starting synchronisation')
-            do_sync(cookies, dir_path, media_format_env, temp_dir, ign_file_path, ign_patterns, notify_url, concurrency, max_retries, retry_wait, skip_item_index)
+            do_sync(cookies, dir_path, media_format_env, temp_dir, ign_file_path, ign_patterns, notify_url, concurrency, max_retries, retry_wait, skip_item_index, dir_format=dir_format)
             random_delay = randrange(0, 3600)
             time_now = datetime.now(tz).replace(microsecond=0)
             time_tomorrow = time_now + timedelta(days=1)

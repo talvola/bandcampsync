@@ -38,14 +38,17 @@ class Syncer:
         retry_wait=5,
         skip_item_index=False,
         sync_ignore_file=False,
+        dir_format="artist-album",
     ):
         self.ignores = Ignores(ign_file_path=ign_file_path, ign_patterns=ign_patterns)
         self.sync_ignore_file = sync_ignore_file
+        self.dir_format = dir_format
         self.local_media = LocalMedia(
             media_dir=dir_path,
             ignores=self.ignores,
             skip_item_index=skip_item_index,
             sync_ignore_file=sync_ignore_file,
+            dir_format=dir_format,
         )
         self.media_format = media_format
         self.temp_dir_root = temp_dir_root
@@ -75,15 +78,18 @@ class Syncer:
             bool: indicating new media was downloaded
         """
 
-        local_path = self.local_media.get_path_for_purchase(item)
-
         # Check if any ignore pattern matches the band name
-        if self.ignores.is_ignored(item):
-            if not self.show_id_file_warning and self.local_media.is_locally_downloaded(
-                item, local_path
-            ):
-                self.show_id_file_warning = True
-            return False
+        if self.dir_format == "artist-album":
+            local_path = self.local_media.get_path_for_purchase(item)
+            if self.ignores.is_ignored(item):
+                if not self.show_id_file_warning and self.local_media.is_locally_downloaded(
+                    item, local_path
+                ):
+                    self.show_id_file_warning = True
+                return False
+        else:
+            if self.ignores.is_ignored(item):
+                return False
 
         if item.is_preorder:
             log.info(
@@ -92,133 +98,164 @@ class Syncer:
             )
             return False
 
-        elif self.local_media.is_locally_downloaded(item, local_path):
-            log.info(
-                f'Already locally downloaded, skipping: "{item.band_name} / {item.item_title}" '
-                f"(id:{item.item_id})"
-            )
-            return False
-
+        if self.dir_format == "artist-album":
+            if self.local_media.is_locally_downloaded(item, local_path):
+                log.info(
+                    f'Already locally downloaded, skipping: "{item.band_name} / {item.item_title}" '
+                    f"(id:{item.item_id})"
+                )
+                return False
         else:
-            log.info(
-                f'New media item, will download: "{item.band_name} / {item.item_title}" '
-                f'(id:{item.item_id}) in "{self.media_format}"'
-            )
+            if self.local_media.is_locally_downloaded_by_id(item):
+                log.info(
+                    f'Already locally downloaded (by id), skipping: "{item.band_name} / {item.item_title}" '
+                    f"(id:{item.item_id})"
+                )
+                return False
 
-            for attempt in range(self.max_retries):
-                try:
-                    initial_download_url = self.bandcamp.get_download_file_url(
-                        item, encoding=self.media_format
-                    )
-                    download_file_url = self.bandcamp.check_download_stat(
-                        item, initial_download_url
-                    )
+        log.info(
+            f'New media item, will download: "{item.band_name} / {item.item_title}" '
+            f'(id:{item.item_id}) in "{self.media_format}"'
+        )
 
-                    with NamedTemporaryFile(
-                        mode="w+b", delete=True, dir=self.temp_dir_root
-                    ) as temp_file:
-                        log.info(
-                            f'Downloading item "{item.band_name} / {item.item_title}" (id:{item.item_id}) '
-                            f"from {mask_sig(download_file_url)} to {temp_file.name}"
-                        )
-                        download_file(download_file_url, temp_file)
-                        temp_file.seek(0)
-                        temp_file_path = Path(temp_file.name)
-                        if is_zip_file(temp_file_path):
-                            with TemporaryDirectory(dir=self.temp_dir_root) as temp_dir:
-                                log.info(
-                                    f'Decompressing downloaded zip "{temp_file.name}" to "{temp_dir}"'
-                                )
-                                unzip_file(temp_file.name, temp_dir)
-                                temp_path = Path(temp_dir)
-                                try:
-                                    local_path.mkdir(parents=True, exist_ok=True)
-                                except OSError as e:
-                                    log.error(
-                                        f"Failed to create directory: {local_path} ({e}), skipping file extraction"
-                                    )
-                                    continue
-                                for file_path in temp_path.iterdir():
-                                    file_dest = self.local_media.get_path_for_file(
-                                        local_path, file_path.name
-                                    )
-                                    log.info(
-                                        f'Moving extracted file: "{file_path}" to "{file_dest}"'
-                                    )
-                                    try:
-                                        move_file(file_path, file_dest)
-                                    except OSError as e:
-                                        log.error(
-                                            f"Failed to move {file_path} to {file_dest}: {e}"
-                                        )
-                        elif item.item_type == "track":
-                            slug = item.item_title
-                            if item.url_hints and isinstance(item.url_hints, dict):
-                                slug = item.url_hints.get("slug", item.item_title)
-                            format_extension = self.local_media.clean_format(
-                                self.media_format
+        for attempt in range(self.max_retries):
+            try:
+                initial_download_url = self.bandcamp.get_download_file_url(
+                    item, encoding=self.media_format
+                )
+                download_file_url = self.bandcamp.check_download_stat(
+                    item, initial_download_url
+                )
+
+                with NamedTemporaryFile(
+                    mode="w+b", delete=True, dir=self.temp_dir_root
+                ) as temp_file:
+                    log.info(
+                        f'Downloading item "{item.band_name} / {item.item_title}" (id:{item.item_id}) '
+                        f"from {mask_sig(download_file_url)} to {temp_file.name}"
+                    )
+                    content_filename = download_file(download_file_url, temp_file)
+                    temp_file.seek(0)
+                    temp_file_path = Path(temp_file.name)
+                    if is_zip_file(temp_file_path):
+                        # Determine local_path for zip format after download
+                        if self.dir_format == "zip":
+                            local_path = self.local_media.get_path_for_zip_purchase(
+                                item, content_filename
                             )
+                        elif self.dir_format != "artist-album":
+                            local_path = self.local_media.get_path_for_purchase(item)
+
+                        # In zip mode, check if target directory already exists
+                        if self.dir_format == "zip" and local_path.is_dir() and any(local_path.iterdir()):
+                            log.info(
+                                f'Target directory already exists with files, writing tracking and skipping extraction: '
+                                f'"{local_path}" (id:{item.item_id})'
+                            )
+                            if self.ign_file_path:
+                                self.ignores.add(item)
+                            else:
+                                self.local_media.write_bandcamp_id(item, local_path)
+                            return False
+
+                        with TemporaryDirectory(dir=self.temp_dir_root) as temp_dir:
+                            log.info(
+                                f'Decompressing downloaded zip "{temp_file.name}" to "{temp_dir}"'
+                            )
+                            unzip_file(temp_file.name, temp_dir)
+                            temp_path = Path(temp_dir)
                             try:
                                 local_path.mkdir(parents=True, exist_ok=True)
                             except OSError as e:
                                 log.error(
-                                    f"Failed to create directory: {local_path} ({e}), skipping file write"
+                                    f"Failed to create directory: {local_path} ({e}), skipping file extraction"
                                 )
                                 continue
-                            file_dest = self.local_media.get_path_for_file(
-                                local_path, f"{slug}.{format_extension}"
-                            )
-                            log.info(
-                                f'Copying single track: "{temp_file_path}" to "{file_dest}"'
-                            )
-                            try:
-                                copy_file(temp_file_path, file_dest)
-                            except OSError as e:
-                                log.error(
-                                    f"Failed to copy {temp_file_path} to {file_dest}: {e}"
+                            for file_path in temp_path.iterdir():
+                                file_dest = self.local_media.get_path_for_file(
+                                    local_path, file_path.name
                                 )
-                        else:
-                            log.error(
-                                f'Downloaded file for "{item.band_name} / {item.item_title}" (id:{item.item_id}) '
-                                f'at "{temp_file_path}" is not a zip archive or a single track, skipping'
-                            )
-                            return False
+                                log.info(
+                                    f'Moving extracted file: "{file_path}" to "{file_dest}"'
+                                )
+                                try:
+                                    move_file(file_path, file_dest)
+                                except OSError as e:
+                                    log.error(
+                                        f"Failed to move {file_path} to {file_dest}: {e}"
+                                    )
+                    elif item.item_type == "track":
+                        # Determine local_path for zip format track
+                        if self.dir_format == "zip":
+                            local_path = self.local_media.get_path_for_track_purchase(item)
 
-                        if self.ign_file_path:
-                            # We assume that if you use an ignore file once, you'll
-                            # keep using it forever (e.g. Docker).
-                            # In case you don't, you'll get warnings for missing id file
-                            # on the items downloaded in the current session.
-                            self.ignores.add(item)
-                        else:
-                            self.local_media.write_bandcamp_id(item, local_path)
-
-                        self.new_items_downloaded = True
-                        return True
-
-                except (
-                    BandcampError,
-                    DownloadBadStatusCode,
-                    DownloadInvalidContentType,
-                ) as e:
-                    if attempt < self.max_retries - 1:
-                        log.warning(
-                            f"Attempt {attempt + 1} failed for {item.band_name} / {item.item_title}: {e}. "
-                            f"Retrying in {self.retry_wait} seconds..."
+                        slug = item.item_title
+                        if item.url_hints and isinstance(item.url_hints, dict):
+                            slug = item.url_hints.get("slug", item.item_title)
+                        format_extension = self.local_media.clean_format(
+                            self.media_format
                         )
-                        time.sleep(self.retry_wait)
-                        continue
+                        try:
+                            local_path.mkdir(parents=True, exist_ok=True)
+                        except OSError as e:
+                            log.error(
+                                f"Failed to create directory: {local_path} ({e}), skipping file write"
+                            )
+                            continue
+                        file_dest = self.local_media.get_path_for_file(
+                            local_path, f"{slug}.{format_extension}"
+                        )
+                        log.info(
+                            f'Copying single track: "{temp_file_path}" to "{file_dest}"'
+                        )
+                        try:
+                            copy_file(temp_file_path, file_dest)
+                        except OSError as e:
+                            log.error(
+                                f"Failed to copy {temp_file_path} to {file_dest}: {e}"
+                            )
                     else:
                         log.error(
-                            f"All {self.max_retries} attempts failed for {item.band_name} / {item.item_title}: {e}. Skipping."
+                            f'Downloaded file for "{item.band_name} / {item.item_title}" (id:{item.item_id}) '
+                            f'at "{temp_file_path}" is not a zip archive or a single track, skipping'
                         )
                         return False
-                except DownloadExpired:
+
+                    if self.ign_file_path:
+                        # We assume that if you use an ignore file once, you'll
+                        # keep using it forever (e.g. Docker).
+                        # In case you don't, you'll get warnings for missing id file
+                        # on the items downloaded in the current session.
+                        self.ignores.add(item)
+                    else:
+                        self.local_media.write_bandcamp_id(item, local_path)
+
+                    self.new_items_downloaded = True
+                    return True
+
+            except (
+                BandcampError,
+                DownloadBadStatusCode,
+                DownloadInvalidContentType,
+            ) as e:
+                if attempt < self.max_retries - 1:
+                    log.warning(
+                        f"Attempt {attempt + 1} failed for {item.band_name} / {item.item_title}: {e}. "
+                        f"Retrying in {self.retry_wait} seconds..."
+                    )
+                    time.sleep(self.retry_wait)
+                    continue
+                else:
                     log.error(
-                        f'Download expired and requires email confirmation on Bandcamp for "{item.band_name} / {item.item_title}" '
-                        f"(id:{item.item_id}), skipping"
+                        f"All {self.max_retries} attempts failed for {item.band_name} / {item.item_title}: {e}. Skipping."
                     )
                     return False
+            except DownloadExpired:
+                log.error(
+                    f'Download expired and requires email confirmation on Bandcamp for "{item.band_name} / {item.item_title}" '
+                    f"(id:{item.item_id}), skipping"
+                )
+                return False
 
     async def sync_items(self):
         """Syncs all items with optional concurrency."""

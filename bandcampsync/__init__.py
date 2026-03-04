@@ -1,8 +1,9 @@
 from .config import VERSION as version
 from .sync import Syncer
+from .report import generate_report
 
 
-__all__ = ["version", "do_sync", "Syncer"]
+__all__ = ["version", "do_sync", "generate_report", "Syncer"]
 
 
 def do_sync(
@@ -18,6 +19,7 @@ def do_sync(
     retry_wait=5,
     skip_item_index=False,
     sync_ignore_file=False,
+    dir_format="artist-album",
 ):
     Syncer(
         cookies,
@@ -32,6 +34,7 @@ def do_sync(
         retry_wait,
         skip_item_index,
         sync_ignore_file,
+        dir_format,
     )
 
     return True

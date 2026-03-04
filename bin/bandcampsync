@@ -4,7 +4,7 @@
 import sys
 import argparse
 from pathlib import Path
-from bandcampsync import version, logger, do_sync
+from bandcampsync import version, logger, do_sync, generate_report
 
 
 log = logger.get_logger('run')
@@ -41,6 +41,12 @@ if __name__ == '__main__':
         help='Skip indexing downloaded items in the filesystem; only use ignore file for to determining which items are downloaded already')
     parser.add_argument('--sync-ignore-file', action='store_true',
         help='Add already downloaded items found in filesystem to ignore file')
+    parser.add_argument('--dir-format', choices=['artist-album', 'zip'], default='artist-album',
+        help='Directory naming format: "artist-album" (default: Artist/Album) or "zip" (Artist - Album, with label grouping)')
+    parser.add_argument('--report', action='store_true',
+        help='Run in report mode: compare purchases to local files without downloading')
+    parser.add_argument('--report-csv', default='',
+        help='Write a CSV report to the given path (implies --report)')
     args = parser.parse_args()
     if args.version:
         print(f'BandcampSync version: {version}', file=sys.stdout)
@@ -52,6 +58,7 @@ if __name__ == '__main__':
     media_format = args.format
     skip_item_index = args.skip_item_index
     sync_ignore_file = args.sync_ignore_file
+    dir_format = args.dir_format
 
     if skip_item_index and not ign_file_path:
         raise ValueError("--skip-item-index was passed, but no ignore file path was passed. --skip-item-index requires an ignore file path (--ignore-file/-I)")
@@ -85,6 +92,19 @@ if __name__ == '__main__':
     with open(cookies_path, 'rt') as f:
         cookies = f.read().strip()
     log.info(f'Loaded cookies from "{cookies_path}"')
+    if args.report or args.report_csv:
+        csv_path = Path(args.report_csv).resolve() if args.report_csv else None
+        generate_report(
+            cookies,
+            dir_path,
+            ign_file_path=ign_file_path,
+            ign_patterns=ign_patterns,
+            skip_item_index=skip_item_index,
+            dir_format=dir_format,
+            csv_path=csv_path,
+        )
+        log.info('Report complete')
+        sys.exit(0)
     do_sync(
         cookies,
         dir_path,
@@ -97,6 +117,7 @@ if __name__ == '__main__':
         max_retries,
         retry_wait,
         skip_item_index,
-        sync_ignore_file
+        sync_ignore_file,
+        dir_format,
     )
     log.info(f'Done')
