@@ -1,12 +1,14 @@
 import asyncio
+import os
 import time
 from pathlib import Path
 from tempfile import NamedTemporaryFile, TemporaryDirectory
 from .logger import get_logger
-from .bandcamp import Bandcamp, BandcampError, BandcampDownloadUnavailable
+from .bandcamp import Bandcamp, BandcampError
 from .ignores import Ignores
 from .media import LocalMedia
 from .notify import NotifyURL
+from curl_cffi.requests.exceptions import RequestException
 from .download import (
     download_file,
     unzip_file,
@@ -127,16 +129,21 @@ class Syncer:
                     item, initial_download_url
                 )
 
-                with NamedTemporaryFile(
-                    mode="w+b", delete=True, dir=self.temp_dir_root
-                ) as temp_file:
+                temp_file = NamedTemporaryFile(
+                    mode="w+b", delete=False, dir=self.temp_dir_root
+                )
+                temp_file_path = Path(temp_file.name)
+                try:
                     log.info(
                         f'Downloading item "{item.band_name} / {item.item_title}" (id:{item.item_id}) '
                         f"from {mask_sig(download_file_url)} to {temp_file.name}"
                     )
                     content_filename = download_file(download_file_url, temp_file)
-                    temp_file.seek(0)
-                    temp_file_path = Path(temp_file.name)
+                    # Close the temp file before any operation that re-opens
+                    # it by path. On Windows, NamedTemporaryFile holds an
+                    # exclusive lock that prevents other code (ZipFile,
+                    # shutil.copyfile) from opening the same file.
+                    temp_file.close()
                     if is_zip_file(temp_file_path):
                         # Determine local_path for zip format after download
                         if self.dir_format == "zip":
@@ -160,9 +167,9 @@ class Syncer:
 
                         with TemporaryDirectory(dir=self.temp_dir_root) as temp_dir:
                             log.info(
-                                f'Decompressing downloaded zip "{temp_file.name}" to "{temp_dir}"'
+                                f'Decompressing downloaded zip "{temp_file_path}" to "{temp_dir}"'
                             )
-                            unzip_file(temp_file.name, temp_dir)
+                            unzip_file(str(temp_file_path), temp_dir)
                             temp_path = Path(temp_dir)
                             try:
                                 local_path.mkdir(parents=True, exist_ok=True)
@@ -189,9 +196,12 @@ class Syncer:
                         if self.dir_format == "zip":
                             local_path = self.local_media.get_path_for_track_purchase(item)
 
-                        slug = item.item_title
-                        if item.url_hints and isinstance(item.url_hints, dict):
-                            slug = item.url_hints.get("slug", item.item_title)
+                        if self.dir_format == "zip":
+                            track_name = f"{item.band_name} - {item.item_title}"
+                        else:
+                            track_name = item.item_title
+                            if item.url_hints and isinstance(item.url_hints, dict):
+                                track_name = item.url_hints.get("slug", item.item_title)
                         format_extension = self.local_media.clean_format(
                             self.media_format
                         )
@@ -203,7 +213,7 @@ class Syncer:
                             )
                             continue
                         file_dest = self.local_media.get_path_for_file(
-                            local_path, f"{slug}.{format_extension}"
+                            local_path, f"{track_name}.{format_extension}"
                         )
                         log.info(
                             f'Copying single track: "{temp_file_path}" to "{file_dest}"'
@@ -232,11 +242,18 @@ class Syncer:
 
                     self.new_items_downloaded = True
                     return True
+                finally:
+                    temp_file.close()
+                    try:
+                        os.unlink(temp_file.name)
+                    except OSError:
+                        pass
 
             except (
                 BandcampError,
                 DownloadBadStatusCode,
                 DownloadInvalidContentType,
+                RequestException,
             ) as e:
                 if attempt < self.max_retries - 1:
                     log.warning(

@@ -163,6 +163,31 @@ def test_is_locally_downloaded_by_id(tmp_path, ignores):
     assert lm.is_locally_downloaded_by_id(item_missing) is False
 
 
+def test_is_locally_downloaded_by_id_name_fallback(tmp_path, ignores):
+    """When no tracking file exists but directory name matches, return True."""
+    # Create dir without bandcamp_item_id.txt (e.g. label-subdir album)
+    label_dir = tmp_path / "OldLabel"
+    label_dir.mkdir()
+    album_dir = label_dir / "Artist - Album"
+    album_dir.mkdir()
+
+    lm = LocalMedia(
+        media_dir=tmp_path,
+        ignores=ignores,
+        skip_item_index=False,
+        sync_ignore_file=False,
+        dir_format="zip",
+    )
+
+    # No tracking file, so item_id won't match, but name should
+    item = Mock(item_id=12345, band_name="Artist", item_title="Album", folder_suffix="")
+    assert lm.is_locally_downloaded_by_id(item) is True
+
+    # Completely unknown album should still return False
+    item_unknown = Mock(item_id=99999, band_name="Nobody", item_title="Nothing", folder_suffix="")
+    assert lm.is_locally_downloaded_by_id(item_unknown) is False
+
+
 # --- get_path_for_zip_purchase ---
 
 

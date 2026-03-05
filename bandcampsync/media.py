@@ -59,7 +59,8 @@ class LocalMedia:
         for c in normalized_path:
             if c not in disallowed_punctuation:
                 outstr += c
-        return outstr
+        # Windows silently strips trailing dots and spaces from directory names
+        return outstr.rstrip(". ")
 
     def clean_format(self, format_str):
         if "-" not in format_str:
@@ -81,6 +82,8 @@ class LocalMedia:
                         for child3 in child2.iterdir():
                             if child3.name == self.ITEM_INDEX_FILENAME:
                                 item_id = self.read_item_id(child3)
+                                if item_id is None:
+                                    continue
                                 if self.sync_ignore_file:
                                     item = BandcampItem(
                                         {
@@ -107,8 +110,9 @@ class LocalMedia:
             id_file = child1 / self.ITEM_INDEX_FILENAME
             if id_file.is_file():
                 item_id = self.read_item_id(id_file)
-                self.media[item_id] = child1
-                log.info(f"Detected locally downloaded media: {item_id} = {child1}")
+                if item_id is not None:
+                    self.media[item_id] = child1
+                    log.info(f"Detected locally downloaded media: {item_id} = {child1}")
             # Always add to item_names for name-based matching
             self.item_names.add(child1.name)
             # Check depth 2: media_dir/Label/Artist - Album/
@@ -118,8 +122,9 @@ class LocalMedia:
                     id_file2 = child2 / self.ITEM_INDEX_FILENAME
                     if id_file2.is_file():
                         item_id = self.read_item_id(id_file2)
-                        self.media[item_id] = child2
-                        log.info(f"Detected locally downloaded media: {item_id} = {child2}")
+                        if item_id is not None:
+                            self.media[item_id] = child2
+                            log.info(f"Detected locally downloaded media: {item_id} = {child2}")
         return True
 
     def read_item_id(self, filepath):
@@ -127,10 +132,11 @@ class LocalMedia:
             item_id = f.read().strip()
         try:
             return int(item_id)
-        except Exception as e:
-            raise ValueError(
-                f'Failed to cast item ID from {filepath} "{item_id}" as an int: {e}'
-            ) from e
+        except (ValueError, TypeError):
+            log.warning(
+                f'Invalid item ID in {filepath}: "{item_id}", skipping'
+            )
+            return None
 
     def is_locally_downloaded(self, item, local_path):
         if item.item_id in self.media:
@@ -146,8 +152,19 @@ class LocalMedia:
         return False
 
     def is_locally_downloaded_by_id(self, item):
-        """Check only by item_id (used in zip format before download)."""
-        return item.item_id in self.media
+        """Check by item_id, with name-based fallback (used in zip format before download)."""
+        if item.item_id in self.media:
+            return True
+        # Fallback: check if a directory with the expected name already exists
+        # (handles label-disassociated albums that lack tracking files)
+        expected_name = self.get_expected_name_for_zip(item)
+        if expected_name in self.item_names:
+            log.info(
+                f'Detected album by name "{expected_name}" but without matching item ID '
+                f"(id:{item.item_id}), skipping download"
+            )
+            return True
+        return False
 
     def get_path_for_purchase(self, item):
         return (

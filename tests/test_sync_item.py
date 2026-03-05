@@ -1,11 +1,9 @@
 """Tests for Syncer's sync_item functionality and retry logic."""
 
-from unittest.mock import Mock, patch, MagicMock
-from pathlib import Path
+from unittest.mock import Mock, patch
 import pytest
 from bandcampsync.sync import Syncer
 from bandcampsync.bandcamp import BandcampError
-from bandcampsync.download import DownloadBadStatusCode, DownloadInvalidContentType
 
 
 @pytest.fixture
@@ -311,7 +309,7 @@ def test_sync_item_zip_track(syncer_zip, mock_bandcamp, tmp_path):
         assert result is True
         args, _ = mock_copy.call_args
         assert "Artist - TrackTitle" in str(args[1])
-        assert "track-slug.flac" in str(args[1])
+        assert "Artist - TrackTitle.flac" in str(args[1])
 
 
 def test_sync_item_zip_fallback_no_content_disposition(syncer_zip, mock_bandcamp, tmp_path):
@@ -346,3 +344,32 @@ def test_sync_item_zip_fallback_no_content_disposition(syncer_zip, mock_bandcamp
             assert result is True
             expected_dir = tmp_path / "Artist - Album"
             assert expected_dir.is_dir()
+
+
+def test_sync_item_zip_name_fallback_skips_download(syncer_zip, mock_bandcamp, tmp_path):
+    """In zip mode, album with matching dir name but no tracking file is skipped."""
+    # Pre-create a label subdir album without bandcamp_item_id.txt
+    label_dir = tmp_path / "OldLabel"
+    label_dir.mkdir()
+    album_dir = label_dir / "MyBand - MyAlbum"
+    album_dir.mkdir()
+    (album_dir / "track1.flac").write_text("existing audio")
+
+    # Re-index so item_names picks up the subdir
+    syncer_zip.local_media.index()
+
+    item = Mock(
+        is_preorder=False,
+        band_name="MyBand",
+        item_title="MyAlbum",
+        item_id=9999,
+        item_type="album",
+        folder_suffix="",
+        download_url="http://example.com/download",
+    )
+
+    with patch("bandcampsync.sync.download_file") as mock_download:
+        result = syncer_zip.sync_item(item)
+
+        assert result is False
+        mock_download.assert_not_called()
