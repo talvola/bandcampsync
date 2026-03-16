@@ -2,6 +2,7 @@ import json
 import re
 from time import time
 from http.cookies import SimpleCookie
+from urllib.parse import unquote
 from html import unescape as html_unescape
 from urllib.parse import urlsplit, urlunsplit
 from bs4 import BeautifulSoup
@@ -50,12 +51,31 @@ class Bandcamp:
         for cookie_name, morsel in self.cookies.items():
             self.session.cookies.set(cookie_name, morsel.value)
 
+    def _set_cookie(self, name, value):
+        """Set a cookie value, working around SimpleCookie's strict parsing."""
+        self.cookies[name] = value
+
     def load_cookies(self, cookies_str):
         self.cookies = SimpleCookie()
         try:
             self.cookies.load(cookies_str)
-        except Exception as e:
-            raise BandcampError(f"Failed to parse cookies string: {e}") from e
+        except Exception:
+            self.cookies = SimpleCookie()
+        # If SimpleCookie failed or parsed nothing, try plain key=value/key:value format
+        if len(self.cookies) == 0:
+            for line in cookies_str.strip().split("\n"):
+                line = line.strip()
+                if not line or line.startswith("#"):
+                    continue
+                if "\t" not in line:
+                    # Support both key=value and key:value separators
+                    for sep in ("=", ":"):
+                        if sep in line:
+                            name, value = line.split(sep, 1)
+                            value = value.strip().strip('"')
+                            value = unquote(value)
+                            self._set_cookie(name.strip(), value)
+                            break
         if len(self.cookies) == 0:
             # Failed to load any cookies, attempt to parse the cookies string as a Netscape cookies export
             lines = cookies_str.strip().split("\n")
@@ -68,10 +88,7 @@ class Bandcamp:
                 parts = line.split("\t")
                 if len(parts) == 7:
                     domain, tailmatch, path, secure, expires, name, value = parts
-                    cookie_string = f"{name.strip()}={value.strip()}; Domain={domain.strip()}; Path={path.strip()}"
-                    if secure == "TRUE":
-                        cookie_string += "; Secure"
-                    self.cookies.load(cookie_string)
+                    self._set_cookie(name.strip(), value.strip())
         return True
 
     @property
@@ -204,7 +221,7 @@ class Bandcamp:
             raise BandcampError(
                 f'Failed to parse pagedata JSON, "identity.fan" seems invalid: {identity}'
             ) from e
-        self.is_authenticated = self.user_id > 0
+        self.is_authenticated = (self.user_id or 0) > 0
         log.info(
             f"Loaded page data, session is authenticated for user id: {self.user_id})"
         )
