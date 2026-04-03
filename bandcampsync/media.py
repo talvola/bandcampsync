@@ -229,6 +229,8 @@ class LocalMedia:
         norm_title = self._normalize_for_match(
             f"{item.item_title}{item.folder_suffix}"
         )
+        if not norm_title:
+            return None
         for name in self.item_names:
             parts = name.split(" - ", 1)
             if len(parts) == 2:
@@ -248,9 +250,13 @@ class LocalMedia:
         Returns the matching directory name, or None.
         """
         norm_band = self._normalize_for_match(item.band_name)
+        if not norm_band:
+            return None
         norm_title = self._normalize_for_match(
             f"{item.item_title}{item.folder_suffix}"
         )
+        if not norm_title:
+            return None
         for name in self.item_names:
             parts = name.split(" - ", 1)
             if len(parts) != 2:
