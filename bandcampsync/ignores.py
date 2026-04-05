@@ -45,7 +45,7 @@ class Ignores:
             with open(self.ign_file_path, "wt") as f:
                 shutil.copyfile(TEMPLATE_IGNORES_FILE, self.ign_file_path)
 
-        with open(self.ign_file_path, "rt") as f:
+        with open(self.ign_file_path, "rt", encoding="utf-8") as f:
             try:
                 self.ign_lines = f.readlines()
             except Exception as e:

@@ -44,6 +44,33 @@ Package manager is `uv`. Dev dependencies (pytest, pytest-mock, ruff) are in `py
 
 Tests are in `tests/` using pytest with pytest-mock. Test fixtures (JSON payloads) are in `tests/data/`. Tests mock HTTP responses and verify sync logic, Bandcamp API parsing, and download behavior.
 
+## Sync Operations (Erik's Setup)
+
+When asked to sync Bandcamp purchases, use these settings:
+
+```bash
+# Report mode (check what's new without downloading)
+uv run python bin/bandcampsync \
+  -c "bandcamp.com_cookies (1).txt" \
+  -d "N:/Bandcamp (FLAC)" \
+  -I "N:/Bandcamp (FLAC)/.bandcamp-ignore" \
+  --dir-format zip --report
+
+# Full sync (download missing items)
+uv run python bin/bandcampsync \
+  -c "bandcamp.com_cookies (1).txt" \
+  -d "N:/Bandcamp (FLAC)" \
+  -I "N:/Bandcamp (FLAC)/.bandcamp-ignore" \
+  --dir-format zip -f flac -j 3
+```
+
+- **Cookies file:** `bandcamp.com_cookies (1).txt` (exported from browser)
+- **Music directory:** `N:\Bandcamp (FLAC)`
+- **Directory format:** `zip` — "Artist - Album" for regular artists, label subdirectory for compilations/label releases
+- **Ignore file:** `N:\Bandcamp (FLAC)\.bandcamp-ignore` — contains IDs of non-downloadable pages (e.g. submission forms, placeholder pages)
+- **Format:** FLAC
+- **Concurrency:** 3
+
 ## Key Details
 
 - Python 3.10+ required (`.python-version` specifies 3.10)
