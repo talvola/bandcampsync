@@ -221,6 +221,26 @@ def test_get_path_for_zip_purchase_label(tmp_path, ignores):
     assert result == tmp_path / "CoolLabel" / "ActualArtist - MyAlbum"
 
 
+def test_get_path_for_zip_purchase_existing_band_dir_treated_as_label(tmp_path, ignores):
+    """If a directory matching band_name already exists, treat it as a label dir
+    even when the ZIP artist matches band_name (label compilation case)."""
+    label_dir = tmp_path / "Start-track.com"
+    label_dir.mkdir()
+
+    lm = LocalMedia(
+        media_dir=tmp_path,
+        ignores=ignores,
+        skip_item_index=True,
+        sync_ignore_file=False,
+        dir_format="zip",
+    )
+
+    item = Mock(band_name="Start-track.com", item_title="START THE TRACK: VOL. XI",
+                folder_suffix="", item_id=1)
+    result = lm.get_path_for_zip_purchase(item, "Start-track.com - START THE TRACK- VOL. XI.zip")
+    assert result == label_dir / "Start-track.com - START THE TRACK- VOL. XI"
+
+
 def test_get_path_for_zip_purchase_label_case_insensitive(tmp_path, ignores):
     """Case-insensitive comparison for label detection."""
     lm = LocalMedia(

@@ -177,18 +177,16 @@ class LocalMedia:
         """Compute local path for a zip-format purchase.
 
         Uses the ZIP filename from Content-Disposition to determine the directory name.
-        Compares the ZIP artist with band_name to detect label releases.
+        Places into a label subdirectory when the ZIP artist differs from band_name,
+        or when a directory matching band_name already exists (user-organized label).
         """
         zip_artist, zip_album = parse_zip_filename(content_filename)
         if zip_artist and zip_album:
             zip_dirname = PurePosixPath(content_filename).stem
-            # Compare artist to band_name to detect label grouping
-            if zip_artist.lower() != item.band_name.lower():
-                # Label release: Label/Artist - Album
-                return self.media_dir / self._clean_path(item.band_name) / zip_dirname
-            else:
-                # Direct artist release: Artist - Album
-                return self.media_dir / zip_dirname
+            band_dir = self.media_dir / self._clean_path(item.band_name)
+            if zip_artist.lower() != item.band_name.lower() or band_dir.is_dir():
+                return band_dir / zip_dirname
+            return self.media_dir / zip_dirname
         # Fallback: construct from metadata
         dirname = self._clean_path(f"{item.band_name} - {item.item_title}{item.folder_suffix}")
         return self.media_dir / dirname
@@ -237,37 +235,6 @@ class LocalMedia:
                 on_disk_title = self._normalize_for_match(parts[1])
                 if on_disk_title == norm_title:
                     return name
-        return None
-
-    def find_zip_item_by_artist(self, item):
-        """Try to find a locally downloaded item by matching the artist prefix.
-
-        Handles cases where metadata drifted (e.g. label dropped from Bandcamp,
-        title gained/lost a suffix like 'EP'). Checks if any indexed directory
-        starts with 'band_name - ' and the on-disk title is a substring of the
-        Bandcamp title or vice versa (using normalized comparison).
-
-        Returns the matching directory name, or None.
-        """
-        norm_band = self._normalize_for_match(item.band_name)
-        if not norm_band:
-            return None
-        norm_title = self._normalize_for_match(
-            f"{item.item_title}{item.folder_suffix}"
-        )
-        if not norm_title:
-            return None
-        for name in self.item_names:
-            parts = name.split(" - ", 1)
-            if len(parts) != 2:
-                continue
-            on_disk_band = self._normalize_for_match(parts[0])
-            if on_disk_band != norm_band:
-                continue
-            on_disk_title = self._normalize_for_match(parts[1])
-            # Check if one title is a substring of the other
-            if on_disk_title in norm_title or norm_title in on_disk_title:
-                return name
         return None
 
     def get_path_for_file(self, local_path, file_name):

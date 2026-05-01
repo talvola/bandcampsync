@@ -40,11 +40,6 @@ def classify_item(item, local_media, ignores, dir_format):
         match = local_media.find_zip_item_by_title(item)
         if match:
             return ("downloaded", None)
-        # Fallback: artist-prefix match with substring title comparison
-        # (catches metadata drift, e.g. title gained/lost "EP" suffix)
-        match = local_media.find_zip_item_by_artist(item)
-        if match:
-            return ("downloaded", None)
 
     return ("missing", None)
 

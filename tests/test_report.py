@@ -157,22 +157,22 @@ def test_classify_downloaded_zip_label_release(tmp_path, ignores):
     assert status == "downloaded"
 
 
-def test_classify_downloaded_zip_metadata_drift(tmp_path, ignores):
-    """Metadata drift: title gained a suffix since download."""
-    # On disk: downloaded as "Spray - Remixes are Inevitable"
-    # Bandcamp now has title "Remixes are Inevitable EP"
-    label_dir = tmp_path / "AnalogueTrash"
-    label_dir.mkdir()
-    album_dir = label_dir / "Spray - Remixes are Inevitable"
+def test_classify_missing_zip_substring_title(tmp_path, ignores):
+    """Same artist, title is a substring of an existing one — must NOT match.
+
+    Guards against false positives like 'Live at the El Rey' matching
+    'Live at the El Rey (20th Anniversary Edition)', or 'VOL. I' matching 'VOL. IX'.
+    """
+    album_dir = tmp_path / "Collide - Live at the El Rey"
     album_dir.mkdir()
 
     lm = LocalMedia(
         media_dir=tmp_path, ignores=ignores,
         skip_item_index=False, sync_ignore_file=False, dir_format="zip",
     )
-    item = _make_item(99, "Spray", "Remixes are Inevitable EP")
+    item = _make_item(99, "Collide", "Live at the El Rey (20th Anniversary Edition)")
     status, path = classify_item(item, lm, ignores, "zip")
-    assert status == "downloaded"
+    assert status == "missing"
 
 
 # --- print_report ---
