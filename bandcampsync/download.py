@@ -31,7 +31,6 @@ class DownloadInvalidContentType(ValueError):
     pass
 
 
-
 class DownloadExpired(ValueError):
     pass
 
@@ -85,7 +84,9 @@ def _parse_content_disposition_filename(header_value):
     if not header_value:
         return None
     # Try RFC 5987 filename* first (e.g. filename*=UTF-8''Artist%20-%20Album.zip)
-    match = re.search(r"filename\*\s*=\s*UTF-8''(.+?)(?:;|$)", header_value, re.IGNORECASE)
+    match = re.search(
+        r"filename\*\s*=\s*UTF-8''(.+?)(?:;|$)", header_value, re.IGNORECASE
+    )
     if match:
         return unquote(match.group(1).strip())
     # Try quoted filename (e.g. filename="Artist - Album.zip")
@@ -130,7 +131,9 @@ def download_file(
         if major_content_type == disallow_content_type:
             html_body = _read_html_body(r)
             if _is_expired_download_page(html_body):
-                raise DownloadExpired("Download expired and requires email confirmation on Bandcamp")
+                raise DownloadExpired(
+                    "Download expired and requires email confirmation on Bandcamp"
+                )
             raise DownloadInvalidContentType(
                 f"Invalid content type: {major_content_type}"
             )

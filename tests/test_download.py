@@ -1,6 +1,9 @@
 from pathlib import Path
 
-from bandcampsync.download import _is_expired_download_page, _parse_content_disposition_filename
+from bandcampsync.download import (
+    _is_expired_download_page,
+    _parse_content_disposition_filename,
+)
 
 
 def _load_fixture(name):

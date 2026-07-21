@@ -194,7 +194,9 @@ def test_sync_item_zip_label_detection(syncer_zip, mock_bandcamp, tmp_path):
     mock_bandcamp.check_download_stat.return_value = "http://example.com/file_ok"
 
     with (
-        patch("bandcampsync.sync.download_file", return_value="ActualArtist - MyAlbum.zip"),
+        patch(
+            "bandcampsync.sync.download_file", return_value="ActualArtist - MyAlbum.zip"
+        ),
         patch("bandcampsync.sync.is_zip_file", return_value=True),
         patch("bandcampsync.sync.unzip_file"),
         patch("bandcampsync.sync.TemporaryDirectory") as mock_temp_dir,
@@ -312,7 +314,9 @@ def test_sync_item_zip_track(syncer_zip, mock_bandcamp, tmp_path):
         assert "Artist - TrackTitle.flac" in str(args[1])
 
 
-def test_sync_item_zip_fallback_no_content_disposition(syncer_zip, mock_bandcamp, tmp_path):
+def test_sync_item_zip_fallback_no_content_disposition(
+    syncer_zip, mock_bandcamp, tmp_path
+):
     """In zip mode, missing Content-Disposition falls back to metadata-based name."""
     item = Mock(
         is_preorder=False,
@@ -346,7 +350,9 @@ def test_sync_item_zip_fallback_no_content_disposition(syncer_zip, mock_bandcamp
             assert expected_dir.is_dir()
 
 
-def test_sync_item_zip_name_fallback_skips_download(syncer_zip, mock_bandcamp, tmp_path):
+def test_sync_item_zip_name_fallback_skips_download(
+    syncer_zip, mock_bandcamp, tmp_path
+):
     """In zip mode, album with matching dir name but no tracking file is skipped."""
     # Pre-create a label subdir album without bandcamp_item_id.txt
     label_dir = tmp_path / "OldLabel"

@@ -184,7 +184,9 @@ def test_is_locally_downloaded_by_id_name_fallback(tmp_path, ignores):
     assert lm.is_locally_downloaded_by_id(item) is True
 
     # Completely unknown album should still return False
-    item_unknown = Mock(item_id=99999, band_name="Nobody", item_title="Nothing", folder_suffix="")
+    item_unknown = Mock(
+        item_id=99999, band_name="Nobody", item_title="Nothing", folder_suffix=""
+    )
     assert lm.is_locally_downloaded_by_id(item_unknown) is False
 
 
@@ -216,12 +218,16 @@ def test_get_path_for_zip_purchase_label(tmp_path, ignores):
         dir_format="zip",
     )
 
-    item = Mock(band_name="CoolLabel", item_title="MyAlbum", folder_suffix="", item_id=1)
+    item = Mock(
+        band_name="CoolLabel", item_title="MyAlbum", folder_suffix="", item_id=1
+    )
     result = lm.get_path_for_zip_purchase(item, "ActualArtist - MyAlbum.zip")
     assert result == tmp_path / "CoolLabel" / "ActualArtist - MyAlbum"
 
 
-def test_get_path_for_zip_purchase_existing_band_dir_treated_as_label(tmp_path, ignores):
+def test_get_path_for_zip_purchase_existing_band_dir_treated_as_label(
+    tmp_path, ignores
+):
     """If a directory matching band_name already exists, treat it as a label dir
     even when the ZIP artist matches band_name (label compilation case)."""
     label_dir = tmp_path / "Start-track.com"
@@ -235,9 +241,15 @@ def test_get_path_for_zip_purchase_existing_band_dir_treated_as_label(tmp_path, 
         dir_format="zip",
     )
 
-    item = Mock(band_name="Start-track.com", item_title="START THE TRACK: VOL. XI",
-                folder_suffix="", item_id=1)
-    result = lm.get_path_for_zip_purchase(item, "Start-track.com - START THE TRACK- VOL. XI.zip")
+    item = Mock(
+        band_name="Start-track.com",
+        item_title="START THE TRACK: VOL. XI",
+        folder_suffix="",
+        item_id=1,
+    )
+    result = lm.get_path_for_zip_purchase(
+        item, "Start-track.com - START THE TRACK- VOL. XI.zip"
+    )
     assert result == label_dir / "Start-track.com - START THE TRACK- VOL. XI"
 
 

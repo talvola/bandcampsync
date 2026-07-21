@@ -12,8 +12,14 @@ from bandcampsync.media import LocalMedia
 from bandcampsync.report import classify_item, generate_report, print_report, write_csv
 
 
-def _make_item(item_id, band_name="Artist", item_title="Album", is_preorder=False,
-               item_type="album", folder_suffix=""):
+def _make_item(
+    item_id,
+    band_name="Artist",
+    item_title="Album",
+    is_preorder=False,
+    item_type="album",
+    folder_suffix="",
+):
     data = {
         "item_id": item_id,
         "band_name": band_name,
@@ -35,8 +41,11 @@ def ignores():
 
 def test_classify_missing_artist_album(tmp_path, ignores):
     lm = LocalMedia(
-        media_dir=tmp_path, ignores=ignores,
-        skip_item_index=False, sync_ignore_file=False, dir_format="artist-album",
+        media_dir=tmp_path,
+        ignores=ignores,
+        skip_item_index=False,
+        sync_ignore_file=False,
+        dir_format="artist-album",
     )
     item = _make_item(1, "NewArtist", "NewAlbum")
     status, path = classify_item(item, lm, ignores, "artist-album")
@@ -51,8 +60,11 @@ def test_classify_downloaded_artist_album(tmp_path, ignores):
     (album_dir / "bandcamp_item_id.txt").write_text("42\n")
 
     lm = LocalMedia(
-        media_dir=tmp_path, ignores=ignores,
-        skip_item_index=False, sync_ignore_file=False, dir_format="artist-album",
+        media_dir=tmp_path,
+        ignores=ignores,
+        skip_item_index=False,
+        sync_ignore_file=False,
+        dir_format="artist-album",
     )
     item = _make_item(42, "Artist", "Album")
     status, path = classify_item(item, lm, ignores, "artist-album")
@@ -62,8 +74,11 @@ def test_classify_downloaded_artist_album(tmp_path, ignores):
 
 def test_classify_preorder(tmp_path, ignores):
     lm = LocalMedia(
-        media_dir=tmp_path, ignores=ignores,
-        skip_item_index=False, sync_ignore_file=False, dir_format="artist-album",
+        media_dir=tmp_path,
+        ignores=ignores,
+        skip_item_index=False,
+        sync_ignore_file=False,
+        dir_format="artist-album",
     )
     item = _make_item(1, is_preorder=True)
     status, path = classify_item(item, lm, ignores, "artist-album")
@@ -74,8 +89,11 @@ def test_classify_preorder(tmp_path, ignores):
 def test_classify_ignored_by_pattern(tmp_path):
     ignores = Ignores(ign_file_path=None, ign_patterns="skipme")
     lm = LocalMedia(
-        media_dir=tmp_path, ignores=ignores,
-        skip_item_index=False, sync_ignore_file=False, dir_format="artist-album",
+        media_dir=tmp_path,
+        ignores=ignores,
+        skip_item_index=False,
+        sync_ignore_file=False,
+        dir_format="artist-album",
     )
     item = _make_item(1, band_name="SkipMe Records")
     status, path = classify_item(item, lm, ignores, "artist-album")
@@ -89,8 +107,11 @@ def test_classify_ignored_by_id(tmp_path):
     ign_path.write_text("99\n")
     ignores = Ignores(ign_file_path=ign_path, ign_patterns="")
     lm = LocalMedia(
-        media_dir=tmp_path, ignores=ignores,
-        skip_item_index=False, sync_ignore_file=False, dir_format="artist-album",
+        media_dir=tmp_path,
+        ignores=ignores,
+        skip_item_index=False,
+        sync_ignore_file=False,
+        dir_format="artist-album",
     )
     item = _make_item(99, "Artist", "Album")
     status, path = classify_item(item, lm, ignores, "artist-album")
@@ -106,8 +127,11 @@ def test_classify_downloaded_zip_by_id(tmp_path, ignores):
     (album_dir / "bandcamp_item_id.txt").write_text("42\n")
 
     lm = LocalMedia(
-        media_dir=tmp_path, ignores=ignores,
-        skip_item_index=False, sync_ignore_file=False, dir_format="zip",
+        media_dir=tmp_path,
+        ignores=ignores,
+        skip_item_index=False,
+        sync_ignore_file=False,
+        dir_format="zip",
     )
     item = _make_item(42, "Artist", "Album")
     status, path = classify_item(item, lm, ignores, "zip")
@@ -122,8 +146,11 @@ def test_classify_downloaded_zip_by_name(tmp_path, ignores):
     (album_dir / "track.flac").write_text("audio")
 
     lm = LocalMedia(
-        media_dir=tmp_path, ignores=ignores,
-        skip_item_index=False, sync_ignore_file=False, dir_format="zip",
+        media_dir=tmp_path,
+        ignores=ignores,
+        skip_item_index=False,
+        sync_ignore_file=False,
+        dir_format="zip",
     )
     item = _make_item(99, "Artist", "Album")
     status, path = classify_item(item, lm, ignores, "zip")
@@ -132,8 +159,11 @@ def test_classify_downloaded_zip_by_name(tmp_path, ignores):
 
 def test_classify_missing_zip(tmp_path, ignores):
     lm = LocalMedia(
-        media_dir=tmp_path, ignores=ignores,
-        skip_item_index=False, sync_ignore_file=False, dir_format="zip",
+        media_dir=tmp_path,
+        ignores=ignores,
+        skip_item_index=False,
+        sync_ignore_file=False,
+        dir_format="zip",
     )
     item = _make_item(1, "NewArtist", "NewAlbum")
     status, path = classify_item(item, lm, ignores, "zip")
@@ -148,8 +178,11 @@ def test_classify_downloaded_zip_label_release(tmp_path, ignores):
     album_dir.mkdir()
 
     lm = LocalMedia(
-        media_dir=tmp_path, ignores=ignores,
-        skip_item_index=False, sync_ignore_file=False, dir_format="zip",
+        media_dir=tmp_path,
+        ignores=ignores,
+        skip_item_index=False,
+        sync_ignore_file=False,
+        dir_format="zip",
     )
     # band_name is the label, item_title has colon which gets cleaned
     item = _make_item(99, "Side-Line Magazine", "Face The Beat: Session 5")
@@ -167,8 +200,11 @@ def test_classify_missing_zip_substring_title(tmp_path, ignores):
     album_dir.mkdir()
 
     lm = LocalMedia(
-        media_dir=tmp_path, ignores=ignores,
-        skip_item_index=False, sync_ignore_file=False, dir_format="zip",
+        media_dir=tmp_path,
+        ignores=ignores,
+        skip_item_index=False,
+        sync_ignore_file=False,
+        dir_format="zip",
     )
     item = _make_item(99, "Collide", "Live at the El Rey (20th Anniversary Edition)")
     status, path = classify_item(item, lm, ignores, "zip")
@@ -210,7 +246,11 @@ def test_print_report_no_missing(capsys):
 def test_write_csv(tmp_path):
     csv_path = tmp_path / "report.csv"
     items = [
-        (_make_item(1, "A1", "T1", item_type="album"), "downloaded", Path("/music/A1/T1")),
+        (
+            _make_item(1, "A1", "T1", item_type="album"),
+            "downloaded",
+            Path("/music/A1/T1"),
+        ),
         (_make_item(2, "A2", "T2", item_type="track"), "missing", None),
     ]
     write_csv(items, csv_path)
@@ -219,7 +259,14 @@ def test_write_csv(tmp_path):
         reader = csv.reader(f)
         rows = list(reader)
 
-    assert rows[0] == ["item_id", "band_name", "item_title", "item_type", "status", "local_path"]
+    assert rows[0] == [
+        "item_id",
+        "band_name",
+        "item_title",
+        "item_type",
+        "status",
+        "local_path",
+    ]
     assert rows[1][0] == "1"
     assert rows[1][1] == "A1"
     assert rows[1][4] == "downloaded"

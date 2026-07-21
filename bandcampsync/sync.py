@@ -84,8 +84,9 @@ class Syncer:
         if self.dir_format == "artist-album":
             local_path = self.local_media.get_path_for_purchase(item)
             if self.ignores.is_ignored(item):
-                if not self.show_id_file_warning and self.local_media.is_locally_downloaded(
-                    item, local_path
+                if (
+                    not self.show_id_file_warning
+                    and self.local_media.is_locally_downloaded(item, local_path)
                 ):
                     self.show_id_file_warning = True
                 return False
@@ -154,9 +155,13 @@ class Syncer:
                             local_path = self.local_media.get_path_for_purchase(item)
 
                         # In zip mode, check if target directory already exists
-                        if self.dir_format == "zip" and local_path.is_dir() and any(local_path.iterdir()):
+                        if (
+                            self.dir_format == "zip"
+                            and local_path.is_dir()
+                            and any(local_path.iterdir())
+                        ):
                             log.info(
-                                f'Target directory already exists with files, writing tracking and skipping extraction: '
+                                f"Target directory already exists with files, writing tracking and skipping extraction: "
                                 f'"{local_path}" (id:{item.item_id})'
                             )
                             if self.ign_file_path:
@@ -194,7 +199,9 @@ class Syncer:
                     elif item.item_type == "track":
                         # Determine local_path for zip format track
                         if self.dir_format == "zip":
-                            local_path = self.local_media.get_path_for_track_purchase(item)
+                            local_path = self.local_media.get_path_for_track_purchase(
+                                item
+                            )
 
                         if self.dir_format == "zip":
                             track_name = f"{item.band_name} - {item.item_title}"

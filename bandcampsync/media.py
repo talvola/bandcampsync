@@ -38,7 +38,14 @@ class LocalMedia:
 
     ITEM_INDEX_FILENAME = "bandcamp_item_id.txt"
 
-    def __init__(self, media_dir, ignores, skip_item_index, sync_ignore_file, dir_format="artist-album"):
+    def __init__(
+        self,
+        media_dir,
+        ignores,
+        skip_item_index,
+        sync_ignore_file,
+        dir_format="artist-album",
+    ):
         self.media_dir = media_dir
         self.ignores = ignores
         self.media = {}
@@ -124,7 +131,9 @@ class LocalMedia:
                         item_id = self.read_item_id(id_file2)
                         if item_id is not None:
                             self.media[item_id] = child2
-                            log.info(f"Detected locally downloaded media: {item_id} = {child2}")
+                            log.info(
+                                f"Detected locally downloaded media: {item_id} = {child2}"
+                            )
         return True
 
     def read_item_id(self, filepath):
@@ -133,9 +142,7 @@ class LocalMedia:
         try:
             return int(item_id)
         except (ValueError, TypeError):
-            log.warning(
-                f'Invalid item ID in {filepath}: "{item_id}", skipping'
-            )
+            log.warning(f'Invalid item ID in {filepath}: "{item_id}", skipping')
             return None
 
     def is_locally_downloaded(self, item, local_path):
@@ -188,12 +195,16 @@ class LocalMedia:
                 return band_dir / zip_dirname
             return self.media_dir / zip_dirname
         # Fallback: construct from metadata
-        dirname = self._clean_path(f"{item.band_name} - {item.item_title}{item.folder_suffix}")
+        dirname = self._clean_path(
+            f"{item.band_name} - {item.item_title}{item.folder_suffix}"
+        )
         return self.media_dir / dirname
 
     def get_path_for_track_purchase(self, item):
         """Compute local path for a single track in zip format."""
-        dirname = self._clean_path(f"{item.band_name} - {item.item_title}{item.folder_suffix}")
+        dirname = self._clean_path(
+            f"{item.band_name} - {item.item_title}{item.folder_suffix}"
+        )
         return self.media_dir / dirname
 
     def get_expected_name_for_zip(self, item):
@@ -224,9 +235,7 @@ class LocalMedia:
 
         Returns the matching directory name, or None.
         """
-        norm_title = self._normalize_for_match(
-            f"{item.item_title}{item.folder_suffix}"
-        )
+        norm_title = self._normalize_for_match(f"{item.item_title}{item.folder_suffix}")
         if not norm_title:
             return None
         for name in self.item_names:

@@ -49,9 +49,11 @@ def _safe_print(text):
     try:
         print(text)
     except UnicodeEncodeError:
-        print(text.encode(sys.stdout.encoding or "utf-8", errors="replace").decode(
-            sys.stdout.encoding or "utf-8", errors="replace"
-        ))
+        print(
+            text.encode(sys.stdout.encoding or "utf-8", errors="replace").decode(
+                sys.stdout.encoding or "utf-8", errors="replace"
+            )
+        )
 
 
 def print_report(results, output=None):
@@ -78,7 +80,9 @@ def print_report(results, output=None):
         lines.append("")
         lines.append("Missing items:")
         for item in missing_items:
-            lines.append(f"  - {item.band_name} / {item.item_title} (id:{item.item_id})")
+            lines.append(
+                f"  - {item.band_name} / {item.item_title} (id:{item.item_id})"
+            )
 
     text = "\n".join(lines)
     if output:
