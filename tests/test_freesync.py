@@ -930,3 +930,33 @@ def test_track_target_path_is_built_from_metadata(tmp_path):
     )
     path = _target_path(tmp_path, "L", track, "Rat Salad.flac")
     assert path == tmp_path / "L" / "SECRET AGENT - Rat Salad"
+
+
+def test_fetch_details_falls_back_to_track_type(monkeypatch):
+    """The real SECRET AGENT Rat Salad case: the id only answers as a track. Querying it
+    as an album returns an empty payload that mimics a delisted item."""
+    from bandcampsync import freesync
+
+    def fake_details(band_id, item_id, item_type):
+        if item_type == "t":
+            return {"id": item_id, "title": "Rat Salad", "type": "t", "price": 0.0}
+        return {"id": None, "title": ""}  # empty as an album
+
+    class _API:
+        tralbum_details = staticmethod(fake_details)
+
+    album = freesync._fetch_details_any_type(_API(), 1, 999, None, "L")
+    assert album is not None
+    assert album.item_id == 999
+    assert album.item_type == "t"
+
+
+def test_fetch_details_returns_none_when_truly_gone(monkeypatch):
+    from bandcampsync import freesync
+
+    class _API:
+        @staticmethod
+        def tralbum_details(band_id, item_id, item_type):
+            return {"id": None, "title": ""}
+
+    assert freesync._fetch_details_any_type(_API(), 1, 999, None, "L") is None

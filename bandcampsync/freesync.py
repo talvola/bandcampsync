@@ -773,6 +773,29 @@ def backfill_ids(config, state, only_labels=None, apply=False, output=None):
     return totals
 
 
+def _fetch_details_any_type(api, band_id, item_id, hint, label_name):
+    """Fetch tralbum_details, trying both item types before giving up.
+
+    An id resolves under exactly one type - a standalone track only answers as "t", an
+    album only as "a" - and querying the wrong one returns an empty payload that looks
+    like a delisted item. So try the hinted type first, then the other, and only treat it
+    as gone when neither yields details.
+    """
+    order = ["t", "a"] if hint in ("t", "track") else ["a", "t"]
+    for item_type in order:
+        try:
+            album = album_from_details(
+                api.tralbum_details(band_id, item_id, item_type),
+                label_name=label_name,
+            )
+        except LabelError as e:
+            log.warning(f"Details fetch for {item_id} as {item_type!r} failed: {e}")
+            continue
+        if album.item_id is not None and album.title:
+            return album
+    return None
+
+
 def pending_albums(config, state, api=None):
     """Rebuild FreeAlbum objects for everything queued, without re-scanning.
 
@@ -799,11 +822,10 @@ def pending_albums(config, state, api=None):
                 api = BandcampAPI(delay=config.request_delay)
             band_id = spec.band_id or state.label(spec.name).get("band_id")
             log.info(f"Cache predates URL storage, fetching details for {item_id}")
-            album = album_from_details(
-                api.tralbum_details(band_id, item_id, (cached.get("item_type") or "a")),
-                label_name=label_name,
+            album = _fetch_details_any_type(
+                api, band_id, item_id, cached.get("item_type"), label_name
             )
-            if album.item_id is None or not album.title:
+            if album is None or album.item_id is None or not album.title:
                 # Delisted or otherwise gone. Record it so the queue drains instead of
                 # carrying an item that can never be fetched.
                 log.warning(
