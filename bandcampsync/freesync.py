@@ -962,7 +962,12 @@ def do_free_sync(
             path = acquire_album(
                 album, specs[label_name], config, get_gmail_reader, temp_dir
             )
-        except (AcquireError, ValueError) as e:
+        except Exception as e:
+            # Deliberately broad. A transient network fault - curl_cffi raises its own
+            # RequestException, which is not a ValueError - would otherwise abort a
+            # multi-hour batch partway through. One album failing must never cost the
+            # rest of the run; anything not classified as permanent stays pending and is
+            # retried on the next run.
             message = str(e)
             permanent = (
                 "does not contain requested encoding" in message

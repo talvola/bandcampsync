@@ -726,3 +726,57 @@ def test_acquire_album_still_accepts_a_plain_reader(monkeypatch):
     config = FreeConfig(email="e@x.com", country="US", postcode="12345")
     spec = LabelSpec(name="L", url="https://l.bandcamp.com/")
     assert freedownload.acquire_album(album, spec, config, _Reader()) == "ok"
+
+
+def test_download_loop_survives_a_transient_network_error(tmp_path, monkeypatch):
+    """curl_cffi raises its own RequestException, which is not a ValueError. Letting it
+    escape aborted a multi-hour batch after 50 successful downloads."""
+    from bandcampsync import freesync
+    from bandcampsync.labelconfig import FreeConfig, LabelSpec
+
+    state_path = tmp_path / "s.json"
+    state = freesync.FreeState(state_path)
+    state.pending[1] = "L"
+    state.pending[2] = "L"
+    for i in (1, 2):
+        state.items[i] = {
+            "title": f"Album {i}",
+            "url": f"https://x.bandcamp.com/album/{i}",
+            "num_tracks": 3,
+            "is_free": True,
+        }
+    state.save()
+
+    media = tmp_path / "media"
+    (media / "L").mkdir(parents=True)
+    config = FreeConfig(
+        labels=[LabelSpec(name="L", url="https://l.bandcamp.com/")],
+        media_dir=media,
+        email="e@x.com",
+        country="US",
+        postcode="12345",
+    )
+
+    class _Boom(Exception):
+        """Stands in for curl_cffi.requests.exceptions.RequestException."""
+
+    calls = []
+
+    def fake_acquire(album, spec, cfg, gmail, temp_dir):
+        calls.append(album.item_id)
+        if album.item_id == 1:
+            raise _Boom("Resolving timed out after 30008 milliseconds")
+        target = media / "L" / f"Album {album.item_id}"
+        target.mkdir(parents=True, exist_ok=True)
+        (target / "t.flac").write_text("x")
+        return target
+
+    monkeypatch.setattr("bandcampsync.freedownload.acquire_album", fake_acquire)
+
+    done = freesync.do_free_sync(config, state_path, pending_only=True)
+
+    # The failure must not stop the second album from being attempted.
+    assert calls == [1, 2]
+    assert sum(1 for _a, path, _e in done if path) == 1
+    # A transient failure stays queued for the next run rather than being written off.
+    assert 1 in freesync.FreeState(state_path).pending
