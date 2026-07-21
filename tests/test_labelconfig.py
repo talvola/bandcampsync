@@ -41,6 +41,19 @@ def test_various_artists_tolerates_real_world_spellings():
         assert ok is True, spelling
 
 
+def test_various_artists_matches_common_abbreviations():
+    """B O G U S COLLECTIVE credits its compilations to "V/A"."""
+    for spelling in ("V/A", "v/a", "V.A.", "V / A", "V.A"):
+        ok, _ = matches(_album(artist=spelling), {"various_artists": True})
+        assert ok is True, spelling
+
+
+def test_various_artists_does_not_match_a_bare_va():
+    """"VA" on its own is plausible as a real artist name, so it must not match."""
+    ok, _ = matches(_album(artist="VA"), {"various_artists": True})
+    assert ok is False
+
+
 def test_various_artists_still_rejects_near_misses():
     for spelling in ("Various Artists Collective", "The Various Artists", "Various"):
         ok, _ = matches(_album(artist=spelling), {"various_artists": True})

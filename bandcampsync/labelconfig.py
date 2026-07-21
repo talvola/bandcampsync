@@ -25,8 +25,12 @@ log = get_logger("labelconfig")
 MAX_PRICE = 0.0
 
 # Labels are inconsistent about this field. The Audio Atelier alone uses "Various Artists",
-# "Various Artist" and "Various artist" across its catalogue, so match loosely.
-VARIOUS_ARTISTS_REGEX = re.compile(r"^\s*various\s+artists?\s*$", re.IGNORECASE)
+# "Various Artist" and "Various artist" across its catalogue; UNKNOWN PLEASURES writes it in
+# caps; B O G U S COLLECTIVE abbreviates it to "V/A". Match all of those.
+# Deliberately does NOT match a bare "VA", which is plausible as a real artist name.
+VARIOUS_ARTISTS_REGEX = re.compile(
+    r"^\s*(?:various\s+artists?|v\s*[./]\s*a\.?)\s*$", re.IGNORECASE
+)
 
 VALID_RULES = {
     "various_artists",
