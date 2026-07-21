@@ -103,7 +103,9 @@ class FreeState:
             except (TypeError, ValueError):
                 dropped += 1
         if dropped:
-            log.warning(f"Dropped {dropped} malformed {what} key(s) from the state file")
+            log.warning(
+                f"Dropped {dropped} malformed {what} key(s) from the state file"
+            )
         return out
 
     def save(self):
@@ -655,6 +657,100 @@ def generate_free_report(config, state_path, full_scan=False, only_labels=None):
     return all_results
 
 
+def backfill_ids(config, state, only_labels=None, apply=False, output=None):
+    """Write bandcamp_item_id.txt into local directories that lack one.
+
+    Dedup falls back to matching normalised titles when no id file exists, and that is
+    fragile in practice: labels rename releases, add catalogue numbers, drop "(free!)"
+    suffixes, and reuse titles across different releases. Stamping the item id makes
+    matching exact and permanent.
+
+    Cheap: one band_details request per label, no per-album lookups. Only writes where
+    the mapping is unambiguous in both directions - exactly one local directory and
+    exactly one remote release share the title.
+    """
+    api = BandcampAPI(delay=config.request_delay)
+    totals = {"written": 0, "have": 0, "ambiguous": 0, "unmatched": 0}
+
+    for spec in config.labels:
+        if only_labels and spec.name not in only_labels:
+            continue
+        index = LabelIndex(config.media_dir, spec.name)
+        if not index.dir.is_dir():
+            continue
+        band_id = spec.band_id or state.label(spec.name).get("band_id")
+        if not band_id:
+            try:
+                band_id = api.resolve_band_id(spec.url)
+            except LabelError as e:
+                _safe_print(f"  {spec.name}: cannot resolve band id: {e}", output)
+                continue
+
+        try:
+            disco = list_discography(api, band_id)
+        except LabelError as e:
+            _safe_print(f"  {spec.name}: discography failed: {e}", output)
+            continue
+
+        remote = {}
+        for entry in disco:
+            remote.setdefault(LocalMedia._normalize_for_match(entry.title), []).append(
+                entry
+            )
+
+        rows = []
+        for key, dirs in sorted(index.by_title.items()):
+            for dirname in dirs:
+                path = index.dir / dirname
+                if (path / ITEM_INDEX_FILENAME).is_file():
+                    totals["have"] += 1
+                    continue
+                candidates = remote.get(key, [])
+                if len(candidates) == 1 and len(dirs) == 1:
+                    rows.append((dirname, candidates[0].item_id, candidates[0].title))
+                elif len(candidates) > 1 or len(dirs) > 1:
+                    totals["ambiguous"] += 1
+                    rows.append(
+                        (
+                            dirname,
+                            None,
+                            f"ambiguous: {len(candidates)} remote / {len(dirs)} local",
+                        )
+                    )
+                else:
+                    totals["unmatched"] += 1
+
+        writable = [r for r in rows if r[1] is not None]
+        if not rows:
+            continue
+        _safe_print("", output)
+        _safe_print(f"=== {spec.name} ===", output)
+        for dirname, item_id, note in rows:
+            if item_id is None:
+                _safe_print(f"  SKIP  {dirname}  ({note})", output)
+            else:
+                _safe_print(
+                    f"  {'WRITE' if apply else 'would'} {item_id:<12} {dirname}", output
+                )
+        if apply:
+            for dirname, item_id, _note in writable:
+                (index.dir / dirname / ITEM_INDEX_FILENAME).write_text(f"{item_id}\n")
+                totals["written"] += 1
+        else:
+            totals["written"] += len(writable)
+
+    _safe_print("", output)
+    verb = "wrote" if apply else "would write"
+    _safe_print(
+        f"{verb} {totals['written']} id file(s); {totals['have']} already had one, "
+        f"{totals['ambiguous']} ambiguous, {totals['unmatched']} not found remotely",
+        output,
+    )
+    if not apply:
+        _safe_print("(dry run - pass --apply to write)", output)
+    return totals
+
+
 def pending_albums(config, state, api=None):
     """Rebuild FreeAlbum objects for everything queued, without re-scanning.
 
@@ -668,7 +764,9 @@ def pending_albums(config, state, api=None):
     for item_id, label_name in sorted(state.pending.items()):
         spec = specs.get(label_name)
         if not spec:
-            log.warning(f"Pending item {item_id} belongs to unconfigured label {label_name!r}")
+            log.warning(
+                f"Pending item {item_id} belongs to unconfigured label {label_name!r}"
+            )
             continue
         cached = state.items.get(item_id) or {}
         url = cached.get("url")

@@ -44,6 +44,12 @@ if __name__ == '__main__':
     parser.add_argument('--pending-only', action='store_true',
         help='Download the already-queued backlog without re-scanning any label. Use for '
              'repeated bounded runs after an initial scan.')
+    parser.add_argument('--backfill-ids', action='store_true',
+        help='Write bandcamp_item_id.txt into local directories that lack one, making '
+             'dedup exact instead of relying on fragile title matching. Dry run unless '
+             '--apply is given.')
+    parser.add_argument('--apply', action='store_true',
+        help='Actually write changes for --backfill-ids (default is a dry run)')
     parser.add_argument('--check-duplicates', action='store_true',
         help='Report local directories that look like the same release under different '
              'names (labels add catalogue numbers or drop "(free!)" suffixes). Reports '
@@ -94,6 +100,12 @@ if __name__ == '__main__':
     log.info(f'Media directory: {config.media_dir}')
 
     only_labels = set(args.label) if args.label else None
+
+    if args.backfill_ids:
+        from bandcampsync.freesync import FreeState, backfill_ids
+        backfill_ids(config, FreeState(state_path), only_labels=only_labels,
+                     apply=args.apply)
+        sys.exit(0)
 
     if args.check_duplicates:
         from bandcampsync.freesync import report_duplicates
