@@ -569,8 +569,84 @@ def test_cache_refuses_album_without_item_id(tmp_path):
     """Storing under a None key is what corrupted the state file in the first place."""
     state = FreeState(tmp_path / "s.json")
     album = FreeAlbum(
-        item_id=None, title="", artist="", url="", price=0.0, is_set_price=False,
-        require_email=False, free_download=False, num_tracks=0,
+        item_id=None,
+        title="",
+        artist="",
+        url="",
+        price=0.0,
+        is_set_price=False,
+        require_email=False,
+        free_download=False,
+        num_tracks=0,
     )
     state.cache(album, True)
     assert state.items == {}
+
+
+def test_skipped_items_survive_state_roundtrip(tmp_path):
+    """A release with no digital download can never succeed; recording it stops the
+    tool retrying it on every run forever."""
+    path = tmp_path / "s.json"
+    state = FreeState(path)
+    state.skipped[555] = "no flac download"
+    state.pending[555] = "L"
+    state.save()
+
+    reloaded = FreeState(path)
+    assert reloaded.skipped == {555: "no flac download"}
+
+
+def test_scan_does_not_requeue_skipped_items(tmp_path, monkeypatch):
+    from bandcampsync import freesync
+    from bandcampsync.labelconfig import LabelSpec
+    from bandcampsync.labels import DiscoEntry
+
+    state = freesync.FreeState(tmp_path / "s.json")
+    state.label("L")["first_scan_done"] = True
+    state.skipped[7] = "no flac download"
+    state.pending[7] = "L"
+
+    entry = DiscoEntry(item_id=7, item_type="a", title="Tape Only", artist="X")
+    monkeypatch.setattr(freesync, "list_discography", lambda api, band_id: [entry])
+    monkeypatch.setattr(
+        freesync,
+        "album_from_details",
+        lambda details, label_name="": FreeAlbum(
+            item_id=7,
+            title="Tape Only",
+            artist="X",
+            url="",
+            price=0.0,
+            is_set_price=False,
+            require_email=False,
+            free_download=False,
+            num_tracks=5,
+        ),
+    )
+
+    class _API:
+        def tralbum_details(self, *a, **k):
+            return {}
+
+    spec = LabelSpec(name="L", url="https://l.bandcamp.com/", band_id=1)
+    results, _index, _meta = freesync.scan_label(_API(), spec, state, tmp_path)
+
+    assert results[0][1] == freesync.STATUS_ERROR
+    assert "skipped" in results[0][2]
+    assert 7 not in state.pending
+
+
+def test_pending_albums_ignores_skipped(tmp_path):
+    from bandcampsync import freesync
+    from bandcampsync.labelconfig import FreeConfig, LabelSpec
+
+    state = freesync.FreeState(tmp_path / "s.json")
+    state.pending[1] = "L"
+    state.pending[2] = "L"
+    state.skipped[2] = "no flac download"
+    state.items[1] = {"title": "ok", "url": "https://x.bandcamp.com/album/a"}
+    state.items[2] = {"title": "tape", "url": "https://x.bandcamp.com/album/b"}
+
+    config = FreeConfig(labels=[LabelSpec(name="L", url="https://l.bandcamp.com/")])
+    out = freesync.pending_albums(config, state)
+    assert [a.item_id for _lab, a in out] == [1]

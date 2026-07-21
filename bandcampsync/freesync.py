@@ -71,6 +71,10 @@ class FreeState:
         # spotted during the first full scan) would fall behind the cutoff on the next
         # run and never be seen again.
         self.pending = {}
+        # Items that can never be downloaded in the configured format - a physical-only
+        # release with no digital files, for instance. Without this they stay pending and
+        # are retried on every run forever.
+        self.skipped = {}
         self.load()
 
     def load(self):
@@ -88,9 +92,10 @@ class FreeState:
         # file unreadable, which would silently reset every label to a first full scan.
         self.items = self._int_keyed(data.get("items"), "items")
         self.pending = self._int_keyed(data.get("pending"), "pending")
+        self.skipped = self._int_keyed(data.get("skipped"), "skipped")
         log.info(
             f"Loaded state: {len(self.labels)} labels, {len(self.items)} cached albums, "
-            f"{len(self.pending)} pending from {self.path}"
+            f"{len(self.pending)} pending, {len(self.skipped)} skipped from {self.path}"
         )
 
     @staticmethod
@@ -117,6 +122,7 @@ class FreeState:
                     "labels": self.labels,
                     "items": {str(k): v for k, v in self.items.items()},
                     "pending": {str(k): v for k, v in self.pending.items()},
+                    "skipped": {str(k): v for k, v in self.skipped.items()},
                 },
                 f,
                 indent=1,
@@ -476,6 +482,12 @@ def scan_label(api, spec, state, media_dir, full_scan=False):
             state.pending.pop(album.item_id, None)
             results.append((album, STATUS_NOT_FREE, f"{album.price} {album.currency}"))
             continue
+        if album.item_id in state.skipped:
+            state.pending.pop(album.item_id, None)
+            results.append(
+                (album, STATUS_ERROR, f"skipped: {state.skipped[album.item_id]}")
+            )
+            continue
         local, ambiguous = index.find(album)
         if local:
             state.pending.pop(album.item_id, None)
@@ -762,6 +774,8 @@ def pending_albums(config, state, api=None):
     specs = {spec.name: spec for spec in config.labels}
     out = []
     for item_id, label_name in sorted(state.pending.items()):
+        if item_id in state.skipped:
+            continue
         spec = specs.get(label_name)
         if not spec:
             log.warning(
@@ -938,8 +952,23 @@ def do_free_sync(
                 album, specs[label_name], config, gmail_reader, temp_dir
             )
         except (AcquireError, ValueError) as e:
+            message = str(e)
+            permanent = (
+                "does not contain requested encoding" in message
+                or "No download available" in message
+            )
             log.error(f'Failed to download "{album.title}": {e}')
-            done.append((album, None, str(e)))
+            if permanent:
+                # Retrying this every run would never succeed: the release has no
+                # digital files in the requested format (physical-only items, for one).
+                log.warning(
+                    f'Marking "{album.title}" as permanently skipped; it offers no '
+                    f"{config.media_format} download"
+                )
+                state.skipped[album.item_id] = f"no {config.media_format} download"
+                state.pending.pop(album.item_id, None)
+                state.save()
+            done.append((album, None, message))
             continue
         size = sum(p.stat().st_size for p in path.rglob("*") if p.is_file())
         downloaded_bytes += size
