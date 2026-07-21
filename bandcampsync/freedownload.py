@@ -26,7 +26,7 @@ from urllib.parse import urlsplit
 from curl_cffi import requests
 
 from .bandcamp import Bandcamp, BandcampError, BandcampItem
-from .download import download_file, is_zip_file, unzip_file
+from .download import download_file, is_zip_file, move_file, unzip_file
 from .logger import get_logger
 from .media import parse_zip_filename
 
@@ -54,6 +54,11 @@ def _endpoint_for(album, label_url):
     return f"{label_url.rstrip('/')}/email_download"
 
 
+def _item_type_name(album):
+    """bandcamp wants the word, not its letter: "album" or "track"."""
+    return "track" if getattr(album, "item_type", "a") in ("t", "track") else "album"
+
+
 def request_download(label_url, album, email, country, postcode):
     """Ask bandcamp for a free download. Returns a URL, or None if it was emailed."""
     if not email:
@@ -68,9 +73,7 @@ def request_download(label_url, album, email, country, postcode):
     payload = {
         "encoding_name": "none",
         "item_id": str(album.item_id),
-        "item_type": "album"
-        if getattr(album, "item_type", "a") in ("a", "album")
-        else "track",
+        "item_type": _item_type_name(album),
         "address": email,
         "country": country,
         "postcode": str(postcode),
@@ -125,7 +128,7 @@ def resolve_and_download(
             "item_id": album.item_id,
             "band_name": label_name,
             "item_title": album.title,
-            "item_type": "album",
+            "item_type": _item_type_name(album),
         }
     )
     item.download_url = download_page_url
@@ -140,14 +143,18 @@ def resolve_and_download(
         size_mb = tmp_file.stat().st_size / (1024 * 1024)
         log.info(f"Downloaded {content_filename!r} ({size_mb:.1f} MB)")
 
-        if not is_zip_file(tmp_file):
-            raise AcquireError(
-                f"Downloaded file for {album.title!r} is not a zip archive"
-            )
         local_path = _target_path(media_dir, label_name, album, content_filename)
-        log.info(f"Extracting to {local_path}")
         local_path.mkdir(parents=True, exist_ok=True)
-        unzip_file(tmp_file, local_path)
+        if is_zip_file(tmp_file):
+            log.info(f"Extracting to {local_path}")
+            unzip_file(tmp_file, local_path)
+        else:
+            # A standalone track is served as the audio file itself, not an archive.
+            # Give it a directory of its own so it matches the rest of the collection
+            # and can carry the item id file.
+            name = content_filename or f"{album.title}.{media_format}"
+            log.info(f"Single track, moving {name!r} into {local_path}")
+            move_file(str(tmp_file), str(local_path / name))
 
     id_file = local_path / ITEM_INDEX_FILENAME
     id_file.write_text(f"{album.item_id}\n")
@@ -156,13 +163,17 @@ def resolve_and_download(
 
 
 def _target_path(media_dir, label_name, album, content_filename):
-    """Place the album under media_dir/<label>/<zip stem>.
+    """Place the release under media_dir/<label>/<name>.
 
     Mirrors LocalMedia.get_path_for_zip_purchase for the label case: the zip filename is
     "Artist - Album.zip" where Artist is the real album artist, and the label name is the
-    grouping directory.
+    grouping directory. A standalone track arrives as a bare audio file rather than an
+    archive, so its directory is built from the metadata instead.
     """
     media_dir = Path(media_dir)
+    if getattr(album, "item_type", "a") in ("t", "track"):
+        name = f"{album.artist} - {album.title}".strip(" -") or str(album.item_id)
+        return media_dir / label_name / name
     if content_filename:
         zip_artist, zip_album = parse_zip_filename(content_filename)
         if zip_artist and zip_album:

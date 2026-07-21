@@ -49,7 +49,7 @@ def test_various_artists_matches_common_abbreviations():
 
 
 def test_various_artists_does_not_match_a_bare_va():
-    """"VA" on its own is plausible as a real artist name, so it must not match."""
+    """ "VA" on its own is plausible as a real artist name, so it must not match."""
     ok, _ = matches(_album(artist="VA"), {"various_artists": True})
     assert ok is False
 

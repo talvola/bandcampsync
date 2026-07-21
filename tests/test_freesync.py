@@ -855,3 +855,78 @@ def test_a_success_clears_the_failure_count(tmp_path, monkeypatch):
     state = freesync.FreeState(state_path)
     assert 2 not in state.failures
     assert 2 not in state.pending
+
+
+# --- standalone tracks, not just albums ---
+
+
+def test_request_download_names_the_item_type_correctly():
+    """A free release can be a single track. Telling bandcamp "album" for a track makes
+    it refuse with the same misleading "no longer available for free" message."""
+    from bandcampsync.freedownload import _item_type_name
+
+    def album(t):
+        return FreeAlbum(
+            item_id=1,
+            title="x",
+            artist="a",
+            url="",
+            price=0.0,
+            is_set_price=False,
+            require_email=False,
+            free_download=False,
+            num_tracks=1,
+            item_type=t,
+        )
+
+    assert _item_type_name(album("a")) == "album"
+    assert _item_type_name(album("t")) == "track"
+    assert _item_type_name(album("track")) == "track"
+
+
+def test_album_from_details_reads_the_item_type():
+    from bandcampsync.labels import album_from_details
+
+    assert album_from_details({"id": 1, "title": "x", "type": "t"}).item_type == "t"
+    assert album_from_details({"id": 1, "title": "x", "type": "a"}).item_type == "a"
+    # Absent means album, which is overwhelmingly the common case.
+    assert album_from_details({"id": 1, "title": "x"}).item_type == "a"
+
+
+def test_item_type_survives_the_state_cache(tmp_path):
+    state = FreeState(tmp_path / "s.json")
+    track = FreeAlbum(
+        item_id=9,
+        title="Rat Salad",
+        artist="SECRET AGENT",
+        url="u",
+        price=0.0,
+        is_set_price=False,
+        require_email=False,
+        free_download=False,
+        num_tracks=1,
+        item_type="t",
+    )
+    state.cache(track, True)
+    state.save()
+    assert FreeState(tmp_path / "s.json").items[9]["item_type"] == "t"
+
+
+def test_track_target_path_is_built_from_metadata(tmp_path):
+    """A track has no "Artist - Album.zip" filename to derive a directory from."""
+    from bandcampsync.freedownload import _target_path
+
+    track = FreeAlbum(
+        item_id=9,
+        title="Rat Salad",
+        artist="SECRET AGENT",
+        url="",
+        price=0.0,
+        is_set_price=False,
+        require_email=False,
+        free_download=False,
+        num_tracks=1,
+        item_type="t",
+    )
+    path = _target_path(tmp_path, "L", track, "Rat Salad.flac")
+    assert path == tmp_path / "L" / "SECRET AGENT - Rat Salad"

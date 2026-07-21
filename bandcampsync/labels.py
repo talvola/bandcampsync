@@ -57,6 +57,10 @@ class FreeAlbum:
     require_email: bool
     free_download: bool
     num_tracks: int
+    # bandcamp's own code: "a" for an album, "t" for a standalone track. Single tracks
+    # are released free on their own often enough to matter, and every request that
+    # touches an item has to name its type correctly.
+    item_type: str = "a"
     # Default True: absent means the API did not say, and the common case is downloadable.
     has_digital_download: bool = True
     currency: str = ""
@@ -236,6 +240,7 @@ def album_from_details(details, label_name=""):
         is_set_price=bool(details.get("is_set_price")),
         require_email=bool(details.get("require_email")),
         free_download=bool(details.get("free_download")),
+        item_type=(details.get("type") or "a"),
         has_digital_download=bool(details.get("has_digital_download", True)),
         num_tracks=int(details.get("num_downloadable_tracks") or len(tracks)),
         currency=details.get("currency") or "",

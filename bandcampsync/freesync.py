@@ -172,6 +172,7 @@ class FreeState:
             "is_free": is_free,
             "require_email": album.require_email,
             "num_tracks": album.num_tracks,
+            "item_type": album.item_type,
             "checked_ts": int(time.time()),
         }
 
@@ -799,7 +800,8 @@ def pending_albums(config, state, api=None):
             band_id = spec.band_id or state.label(spec.name).get("band_id")
             log.info(f"Cache predates URL storage, fetching details for {item_id}")
             album = album_from_details(
-                api.tralbum_details(band_id, item_id, "a"), label_name=label_name
+                api.tralbum_details(band_id, item_id, (cached.get("item_type") or "a")),
+                label_name=label_name,
             )
             if album.item_id is None or not album.title:
                 # Delisted or otherwise gone. Record it so the queue drains instead of
@@ -823,6 +825,7 @@ def pending_albums(config, state, api=None):
                 require_email=bool(cached.get("require_email")),
                 free_download=False,
                 num_tracks=int(cached.get("num_tracks") or 0),
+                item_type=cached.get("item_type") or "a",
                 label_name=label_name,
             )
         out.append((label_name, album))
