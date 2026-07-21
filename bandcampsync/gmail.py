@@ -137,13 +137,23 @@ class GmailReader:
             )
         return response.json()
 
-    def find_download_links(self, newer_than="1d", max_messages=50):
-        """Return {item_id: download_url} from recent bandcamp download mails."""
+    def find_download_links(self, newer_than="1d", max_messages=100, want_item_id=None):
+        """Return {item_id: download_url} from recent bandcamp download mails.
+
+        Each message body has to be fetched individually, so pass want_item_id when
+        looking for one album: Gmail lists newest first and the link we just triggered is
+        normally the newest message, so this stops after a single fetch instead of
+        reading every recent download mail. Without it, a batch run costs roughly
+        max_messages API calls per album and can miss a link that has fallen outside the
+        newest max_messages.
+        """
         query = f"{SEARCH_QUERY} newer_than:{newer_than}"
         listing = self._get(f"{API_BASE}/messages", q=query, maxResults=max_messages)
         links = {}
+        scanned = 0
         for stub in listing.get("messages") or []:
             message = self._get(f"{API_BASE}/messages/{stub['id']}", format="full")
+            scanned += 1
             text = _collect_text(message.get("payload") or {})
             for url in DOWNLOAD_URL_REGEX.findall(text):
                 url = url.replace("&amp;", "&")
@@ -153,7 +163,15 @@ class GmailReader:
                 item_id = int(match.group(1))
                 # Keep the first seen; Gmail returns newest first.
                 links.setdefault(item_id, url)
-        log.info(f"Found {len(links)} bandcamp download link(s) in Gmail")
+            if want_item_id is not None and want_item_id in links:
+                log.info(
+                    f"Found the download link for {want_item_id} after {scanned} message(s)"
+                )
+                return links
+        log.info(
+            f"Found {len(links)} bandcamp download link(s) in Gmail "
+            f"({scanned} message(s) read)"
+        )
         return links
 
     def wait_for_link(self, item_id, timeout=300, poll_interval=15, newer_than="1d"):
@@ -165,7 +183,9 @@ class GmailReader:
         attempt = 0
         while True:
             attempt += 1
-            links = self.find_download_links(newer_than=newer_than)
+            links = self.find_download_links(
+                newer_than=newer_than, want_item_id=item_id
+            )
             if item_id in links:
                 log.info(
                     f"Got download link for item {item_id} after {attempt} check(s)"
