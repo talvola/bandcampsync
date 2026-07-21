@@ -780,3 +780,78 @@ def test_download_loop_survives_a_transient_network_error(tmp_path, monkeypatch)
     assert sum(1 for _a, path, _e in done if path) == 1
     # A transient failure stays queued for the next run rather than being written off.
     assert 1 in freesync.FreeState(state_path).pending
+
+
+def _sync_env(tmp_path, item_ids):
+    from bandcampsync import freesync
+
+    from bandcampsync.labelconfig import FreeConfig, LabelSpec
+
+    state_path = tmp_path / "s.json"
+    state = freesync.FreeState(state_path)
+    for i in item_ids:
+        state.pending[i] = "L"
+        state.items[i] = {
+            "title": f"Album {i}",
+            "url": f"https://x.bandcamp.com/album/{i}",
+            "num_tracks": 3,
+            "is_free": True,
+        }
+    state.save()
+    media = tmp_path / "media"
+    (media / "L").mkdir(parents=True)
+    config = FreeConfig(
+        labels=[LabelSpec(name="L", url="https://l.bandcamp.com/")],
+        media_dir=media,
+        email="e@x.com",
+        country="US",
+        postcode="12345",
+    )
+    return config, state_path
+
+
+def test_repeated_failures_eventually_give_up(tmp_path, monkeypatch):
+    """An album priced at zero that bandcamp still refuses (an exhausted free-download
+    allocation looks like this) would otherwise be retried on every run forever."""
+    from bandcampsync import freesync
+
+    config, state_path = _sync_env(tmp_path, [1])
+
+    def always_fails(album, spec, cfg, gmail, temp_dir):
+        raise ValueError("Sorry, this item is no longer available for free.")
+
+    monkeypatch.setattr("bandcampsync.freedownload.acquire_album", always_fails)
+
+    for attempt in range(1, freesync.MAX_DOWNLOAD_ATTEMPTS + 1):
+        freesync.do_free_sync(config, state_path, pending_only=True)
+        state = freesync.FreeState(state_path)
+        if attempt < freesync.MAX_DOWNLOAD_ATTEMPTS:
+            assert 1 in state.pending, f"should still be queued after {attempt}"
+            assert 1 not in state.skipped
+    assert 1 not in state.pending
+    assert 1 in state.skipped
+
+
+def test_a_success_clears_the_failure_count(tmp_path, monkeypatch):
+    from bandcampsync import freesync
+
+    config, state_path = _sync_env(tmp_path, [2])
+    calls = {"n": 0}
+
+    def fails_once(album, spec, cfg, gmail, temp_dir):
+        calls["n"] += 1
+        if calls["n"] == 1:
+            raise ValueError("transient")
+        target = config.media_dir / "L" / "Album 2"
+        target.mkdir(parents=True, exist_ok=True)
+        (target / "t.flac").write_text("x")
+        return target
+
+    monkeypatch.setattr("bandcampsync.freedownload.acquire_album", fails_once)
+
+    freesync.do_free_sync(config, state_path, pending_only=True)
+    assert freesync.FreeState(state_path).failures.get(2) == 1
+    freesync.do_free_sync(config, state_path, pending_only=True)
+    state = freesync.FreeState(state_path)
+    assert 2 not in state.failures
+    assert 2 not in state.pending

@@ -39,6 +39,8 @@ log = get_logger("freesync")
 ITEM_INDEX_FILENAME = "bandcamp_item_id.txt"
 # Non-free albums are re-checked after this many days in case a price has changed.
 RECHECK_DAYS = 90
+# Give up on an album after this many consecutive failed download attempts.
+MAX_DOWNLOAD_ATTEMPTS = 3
 
 STATUS_DOWNLOADED = "downloaded"
 STATUS_WANTED = "wanted"
@@ -75,6 +77,11 @@ class FreeState:
         # release with no digital files, for instance. Without this they stay pending and
         # are retried on every run forever.
         self.skipped = {}
+        # Consecutive download failures per item. Some albums are priced at zero but
+        # bandcamp still refuses the download - a limited free-download allocation that
+        # has been used up looks exactly like this. Those cannot be told apart from a
+        # transient fault on a single attempt, so count attempts and give up eventually.
+        self.failures = {}
         self.load()
 
     def load(self):
@@ -93,6 +100,7 @@ class FreeState:
         self.items = self._int_keyed(data.get("items"), "items")
         self.pending = self._int_keyed(data.get("pending"), "pending")
         self.skipped = self._int_keyed(data.get("skipped"), "skipped")
+        self.failures = self._int_keyed(data.get("failures"), "failures")
         log.info(
             f"Loaded state: {len(self.labels)} labels, {len(self.items)} cached albums, "
             f"{len(self.pending)} pending, {len(self.skipped)} skipped from {self.path}"
@@ -123,6 +131,7 @@ class FreeState:
                     "items": {str(k): v for k, v in self.items.items()},
                     "pending": {str(k): v for k, v in self.pending.items()},
                     "skipped": {str(k): v for k, v in self.skipped.items()},
+                    "failures": {str(k): v for k, v in self.failures.items()},
                 },
                 f,
                 indent=1,
@@ -974,21 +983,29 @@ def do_free_sync(
                 or "No download available" in message
             )
             log.error(f'Failed to download "{album.title}": {e}')
-            if permanent:
-                # Retrying this every run would never succeed: the release has no
-                # digital files in the requested format (physical-only items, for one).
+            attempts = state.failures.get(album.item_id, 0) + 1
+            state.failures[album.item_id] = attempts
+            if not permanent and attempts >= MAX_DOWNLOAD_ATTEMPTS:
                 log.warning(
-                    f'Marking "{album.title}" as permanently skipped; it offers no '
-                    f"{config.media_format} download"
+                    f'"{album.title}" has failed {attempts} times; giving up on it. '
+                    f"Clear it from state.failures to retry."
                 )
-                state.skipped[album.item_id] = f"no {config.media_format} download"
+                permanent = True
+                message = f"{message} (after {attempts} attempts)"
+            if permanent:
+                log.warning(f'Marking "{album.title}" as permanently skipped')
+                state.skipped[album.item_id] = message[:200]
                 state.pending.pop(album.item_id, None)
-                state.save()
+                state.failures.pop(album.item_id, None)
+            # Save either way: the attempt count has to survive the run, or a repeatedly
+            # failing album is retried forever because every run starts it back at one.
+            state.save()
             done.append((album, None, message))
             continue
         size = sum(p.stat().st_size for p in path.rglob("*") if p.is_file())
         downloaded_bytes += size
         state.pending.pop(album.item_id, None)
+        state.failures.pop(album.item_id, None)
         state.save()
         done.append((album, path, None))
         log.info(f'Downloaded "{album.title}" -> {path} ({size / 1024**3:.2f} GB)')
