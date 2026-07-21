@@ -650,3 +650,79 @@ def test_pending_albums_ignores_skipped(tmp_path):
     config = FreeConfig(labels=[LabelSpec(name="L", url="https://l.bandcamp.com/")])
     out = freesync.pending_albums(config, state)
     assert [a.item_id for _lab, a in out] == [1]
+
+
+def test_acquire_album_accepts_a_lazy_gmail_reader(monkeypatch):
+    """The cached require_email flag is unreliable, so the reader is built on demand.
+    acquire_album must therefore accept a callable, not just an instance."""
+    from bandcampsync import freedownload
+    from bandcampsync.labelconfig import FreeConfig, LabelSpec
+
+    built = []
+
+    class _Reader:
+        def wait_for_link(self, item_id):
+            return f"https://bandcamp.com/download?id={item_id}"
+
+    def factory():
+        built.append(1)
+        return _Reader()
+
+    # bandcamp emailed the link (returns None), so the reader must be constructed
+    monkeypatch.setattr(freedownload, "request_download", lambda *a, **k: None)
+    captured = {}
+    monkeypatch.setattr(
+        freedownload,
+        "resolve_and_download",
+        lambda url, album, label, media_dir, media_format="flac", temp_dir=None: (
+            captured.setdefault("url", url)
+        ),
+    )
+
+    album = FreeAlbum(
+        item_id=42,
+        title="x",
+        artist="a",
+        url="",
+        price=0.0,
+        is_set_price=False,
+        require_email=False,
+        free_download=False,
+        num_tracks=1,
+    )
+    config = FreeConfig(email="e@x.com", country="US", postcode="12345")
+    spec = LabelSpec(name="L", url="https://l.bandcamp.com/")
+
+    freedownload.acquire_album(album, spec, config, factory)
+    assert built == [1], "reader should be built exactly once, on demand"
+    assert "id=42" in captured["url"]
+
+
+def test_acquire_album_still_accepts_a_plain_reader(monkeypatch):
+    from bandcampsync import freedownload
+    from bandcampsync.labelconfig import FreeConfig, LabelSpec
+
+    class _Reader:
+        def wait_for_link(self, item_id):
+            return "https://bandcamp.com/download?id=7"
+
+    monkeypatch.setattr(freedownload, "request_download", lambda *a, **k: None)
+    monkeypatch.setattr(
+        freedownload,
+        "resolve_and_download",
+        lambda *a, **k: "ok",
+    )
+    album = FreeAlbum(
+        item_id=7,
+        title="x",
+        artist="a",
+        url="",
+        price=0.0,
+        is_set_price=False,
+        require_email=True,
+        free_download=False,
+        num_tracks=1,
+    )
+    config = FreeConfig(email="e@x.com", country="US", postcode="12345")
+    spec = LabelSpec(name="L", url="https://l.bandcamp.com/")
+    assert freedownload.acquire_album(album, spec, config, _Reader()) == "ok"

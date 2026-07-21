@@ -793,10 +793,14 @@ def pending_albums(config, state, api=None):
                 api.tralbum_details(band_id, item_id, "a"), label_name=label_name
             )
             if album.item_id is None or not album.title:
+                # Delisted or otherwise gone. Record it so the queue drains instead of
+                # carrying an item that can never be fetched.
                 log.warning(
-                    f"Skipping pending item {item_id}: bandcamp returned no usable "
-                    f"details for it"
+                    f"Pending item {item_id} returns no usable details; recording it "
+                    f"as unavailable"
                 )
+                state.skipped[item_id] = "no details from bandcamp"
+                state.pending.pop(item_id, None)
                 continue
             state.cache(album, album.is_free)
         else:
@@ -931,12 +935,19 @@ def do_free_sync(
             )
         wanted = wanted[:limit]
 
-    # Only build a Gmail reader if something actually needs one.
-    gmail_reader = None
-    if any(getattr(album, "require_email", False) for _label, album in wanted):
-        from .gmail import GmailReader, load_credentials
+    # Built on first use rather than up front. The cached require_email flag is not a
+    # reliable predictor - bandcamp emails the link for albums cached as not requiring
+    # it - and deciding up front meant those downloads failed outright even though
+    # credentials were available.
+    _gmail = {}
 
-        gmail_reader = GmailReader(load_credentials(client_secret, token_path))
+    def get_gmail_reader():
+        if "reader" not in _gmail:
+            from .gmail import GmailReader, load_credentials
+
+            log.info("Album needs an emailed link, authorising Gmail")
+            _gmail["reader"] = GmailReader(load_credentials(client_secret, token_path))
+        return _gmail["reader"]
 
     done, downloaded_bytes = [], 0
     budget = int(max_gb * 1024**3) if max_gb else None
@@ -949,7 +960,7 @@ def do_free_sync(
             break
         try:
             path = acquire_album(
-                album, specs[label_name], config, gmail_reader, temp_dir
+                album, specs[label_name], config, get_gmail_reader, temp_dir
             )
         except (AcquireError, ValueError) as e:
             message = str(e)

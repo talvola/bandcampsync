@@ -321,17 +321,22 @@ def repair_album(album, spec, config, local_path, gmail_reader=None, temp_dir=No
 
 
 def acquire_album(album, spec, config, gmail_reader=None, temp_dir=None):
-    """Request, retrieve and download one free album. Returns the local path."""
+    """Request, retrieve and download one free album. Returns the local path.
+
+    gmail_reader may be a GmailReader or a zero-argument callable returning one, so the
+    caller can defer authorising Gmail until an album actually needs an emailed link.
+    """
     url = request_download(
         spec.subdomain_url, album, config.email, config.country, config.postcode
     )
     if url is None:
-        if gmail_reader is None:
+        reader = gmail_reader() if callable(gmail_reader) else gmail_reader
+        if reader is None:
             raise AcquireError(
                 f"{album.title!r} requires an emailed download link but Gmail is not "
                 f"configured. Run with --gmail-auth first."
             )
-        url = gmail_reader.wait_for_link(album.item_id)
+        url = reader.wait_for_link(album.item_id)
     return resolve_and_download(
         url,
         album,
