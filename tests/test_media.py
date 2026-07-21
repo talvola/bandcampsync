@@ -313,3 +313,25 @@ def test_get_path_for_track_purchase(tmp_path, ignores):
     item = Mock(band_name="Artist", item_title="TrackName", folder_suffix="", item_id=1)
     result = lm.get_path_for_track_purchase(item)
     assert result == tmp_path / "Artist - TrackName"
+
+
+def test_normalize_collapses_whitespace_left_by_dropped_separators():
+    """Real case: dropping the '-' left a double space, so these did not match and the
+    album was downloaded a second time."""
+    n = LocalMedia._normalize_for_match
+    assert n("TRIPLE AGENT RECORDS - Vol. Vll") == n("TRIPLE AGENT RECORDS Vol. Vll")
+    assert n("Best Of 2023 - The Originals") == n("Best Of 2023 | The Originals")
+    assert n("A  B") == n("A B")
+
+
+def test_normalize_still_separates_genuinely_different_titles():
+    n = LocalMedia._normalize_for_match
+    assert n("Trip to Poland") != n("Trip to Poland II")
+    assert n("Vol. 1") != n("Vol. 2")
+    assert n("Atmospheric Progressive #020") != n("Atmospheric Progressive #021")
+
+
+def test_normalize_handles_tabs_and_newlines():
+    n = LocalMedia._normalize_for_match
+    assert n("A\tB") == n("A B")
+    assert n("  leading and trailing  ") == "leading and trailing"

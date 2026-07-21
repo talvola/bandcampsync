@@ -218,12 +218,18 @@ class LocalMedia:
 
     @staticmethod
     def _normalize_for_match(s):
-        """Reduce a string to lowercase alphanumeric + spaces for fuzzy comparison.
+        """Reduce a string to lowercase alphanumeric + single spaces for comparison.
 
         Handles differences like colon→hyphen vs colon→removed that arise
         because Bandcamp ZIP filenames and _clean_path use different sanitization.
+
+        Runs of whitespace are collapsed. Dropping a separator leaves the spaces that
+        surrounded it behind, so "RECORDS - Vol. VII" reduced to "records  vol vii" with
+        a double space and failed to match "RECORDS Vol. VII" - a real case that caused
+        an album to be downloaded a second time.
         """
-        return "".join(c.lower() for c in s if c.isalnum() or c == " ").strip()
+        cleaned = "".join(c.lower() for c in s if c.isalnum() or c.isspace())
+        return " ".join(cleaned.split())
 
     def find_zip_item_by_title(self, item):
         """Try to find a locally downloaded item by matching the title portion.
