@@ -904,7 +904,7 @@ def do_free_sync(
     pending_only=False,
 ):
     """Scan, then download everything wanted. Returns a list of (album, path or error)."""
-    from .freedownload import AcquireError, acquire_album
+    from .freedownload import acquire_album
 
     if not config.media_dir:
         raise ValueError("No media_dir configured under defaults in the config file")
