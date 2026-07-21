@@ -164,3 +164,21 @@ cookies.txt
 docker-config/
 docker-downloads/
 /bcs
+
+# Exported browser cookies - session credentials, never commit
+*cookies*.txt
+*cookies*.json
+
+# Google OAuth client secret and token for the Gmail integration
+client_secret*.json
+token.json
+
+# Real label configuration contains an email address and postcode
+labels.yaml
+bandcampfree-state.json
+
+# Local run output
+report_stdout.txt
+report_stderr.txt
+sync_stdout.txt
+sync_stderr.txt

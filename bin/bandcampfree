@@ -1,0 +1,143 @@
+#!/usr/bin/env python
+
+
+import sys
+import argparse
+from pathlib import Path
+from bandcampsync import version, logger
+from bandcampsync.labelconfig import load_config
+from bandcampsync.freesync import generate_free_report, do_free_sync
+
+
+log = logger.get_logger('runfree')
+
+
+if __name__ == '__main__':
+    parser = argparse.ArgumentParser(
+        prog='bandcampfree',
+        description='Watches record label bandcamp.com pages for free and pay-what-you-want albums',
+    )
+    parser.add_argument('-v', '--version', action='store_true',
+        help='Displays the bandcampsync version and exits')
+    parser.add_argument('-C', '--config', default='',
+        help='Path to the YAML label configuration file')
+    parser.add_argument('-d', '--directory', default='',
+        help='Path to the media directory, overrides defaults.media_dir in the config')
+    parser.add_argument('-s', '--state', default='',
+        help='Path to the scan state file (default: alongside the config as bandcampfree-state.json)')
+    parser.add_argument('-l', '--label', action='append', default=[],
+        help='Only scan the named label, may be repeated')
+    parser.add_argument('--full-scan', action='store_true',
+        help='Ignore release date cutoffs and re-examine every album for each label')
+    parser.add_argument('--report', action='store_true',
+        help='Report what would be downloaded without downloading anything')
+    parser.add_argument('--limit', type=int, default=0,
+        help='Download at most this many albums this run')
+    parser.add_argument('--max-gb', type=float, default=0.0,
+        help='Stop once this many GB have been downloaded this run')
+    parser.add_argument('-t', '--temp-dir', default='',
+        help='Path to use for temporary downloads')
+    parser.add_argument('--repair', type=int, default=0, metavar='ITEM_ID',
+        help='Re-fetch one album and add only the files missing from its local directory. '
+             'For albums a label extended after the original download; bandcamp does not '
+             'allow fetching individual tracks of a compilation.')
+    parser.add_argument('--pending-only', action='store_true',
+        help='Download the already-queued backlog without re-scanning any label. Use for '
+             'repeated bounded runs after an initial scan.')
+    parser.add_argument('--check-duplicates', action='store_true',
+        help='Report local directories that look like the same release under different '
+             'names (labels add catalogue numbers or drop "(free!)" suffixes). Reports '
+             'only; removes nothing.')
+    parser.add_argument('--gmail-auth', action='store_true',
+        help='Run the one-time Gmail authorisation flow and exit')
+    parser.add_argument('--client-secret', default=str(Path.home() / '.bandcampfree' / 'client_secret.json'),
+        help='Path to the Google OAuth desktop client JSON')
+    parser.add_argument('--token', default=str(Path.home() / '.bandcampfree' / 'token.json'),
+        help='Path to store the Gmail OAuth token')
+    args = parser.parse_args()
+
+    if args.version:
+        print(f'BandcampSync version: {version}', file=sys.stdout)
+        sys.exit(0)
+
+    if args.gmail_auth:
+        from bandcampsync.gmail import load_credentials, GmailReader
+        creds = load_credentials(args.client_secret, args.token)
+        reader = GmailReader(creds)
+        links = reader.find_download_links(newer_than='7d')
+        log.info(f'Gmail authorisation complete, token stored at {args.token}')
+        if links:
+            log.info(f'Found {len(links)} recent bandcamp download link(s):')
+            for item_id, url in sorted(links.items()):
+                log.info(f'  item {item_id}: {url[:70]}...')
+        else:
+            log.info('No bandcamp download emails found in the last 7 days')
+        sys.exit(0)
+
+    if not args.config:
+        raise ValueError('A configuration file is required (--config/-C)')
+
+    config_path = Path(args.config).resolve()
+    config = load_config(config_path)
+
+    if args.directory:
+        config.media_dir = Path(args.directory).resolve()
+    if not config.media_dir:
+        raise ValueError('No media directory set, use --directory or defaults.media_dir')
+    if not config.media_dir.is_dir():
+        raise ValueError(f'Media directory does not exist: {config.media_dir}')
+
+    state_path = Path(args.state).resolve() if args.state else \
+        config_path.parent / 'bandcampfree-state.json'
+
+    log.info(f'BandcampSync (free) v{version} starting')
+    log.info(f'Media directory: {config.media_dir}')
+
+    only_labels = set(args.label) if args.label else None
+
+    if args.check_duplicates:
+        from bandcampsync.freesync import report_duplicates
+        report_duplicates(config, only_labels=only_labels)
+        sys.exit(0)
+
+    if args.repair:
+        from bandcampsync.freesync import do_repair
+        do_repair(
+            config,
+            state_path,
+            args.repair,
+            client_secret=args.client_secret,
+            token_path=args.token,
+        )
+        log.info('Repair complete')
+        sys.exit(0)
+
+    if args.report:
+        generate_free_report(
+            config,
+            state_path,
+            full_scan=args.full_scan,
+            only_labels=only_labels,
+        )
+        log.info('Report complete')
+        sys.exit(0)
+
+    temp_dir = None
+    if args.temp_dir:
+        temp_dir = Path(args.temp_dir).resolve()
+        if not temp_dir.is_dir():
+            raise ValueError(f'Temporary directory does not exist: {temp_dir}')
+
+    do_free_sync(
+        config,
+        state_path,
+        full_scan=args.full_scan,
+        only_labels=only_labels,
+        limit=args.limit,
+        max_gb=args.max_gb,
+        temp_dir=temp_dir,
+        client_secret=args.client_secret,
+        token_path=args.token,
+        pending_only=args.pending_only,
+    )
+    log.info('Done')

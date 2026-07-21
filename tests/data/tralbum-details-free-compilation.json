@@ -1,0 +1,37 @@
+{
+ "id": 760931394,
+ "title": "Atmospheric Progressive #021 (Free Download)",
+ "tralbum_artist": "Various Artists",
+ "price": 0.0,
+ "is_set_price": false,
+ "require_email": true,
+ "free_download": false,
+ "currency": "EUR",
+ "num_downloadable_tracks": 30,
+ "bandcamp_url": "https://futureavenuelabel.bandcamp.com/album/atmospheric-progressive-021-free-download",
+ "release_date": 1783036800,
+ "type": "a",
+ "label": null,
+ "tracks": [
+  {
+   "band_name": "Secretly Famous",
+   "title": "Galerus (Juan Ram Remix)",
+   "track_num": 1
+  },
+  {
+   "band_name": "Christopher Hermann",
+   "title": "The End of Our Story (Part 2) (Shayan Pasha Remix)",
+   "track_num": 2
+  },
+  {
+   "band_name": "Kris Dur",
+   "title": "Calupoh",
+   "track_num": 3
+  },
+  {
+   "band_name": "Vitaly Shturm",
+   "title": "Paranoid Girl (Instrumental Mix)",
+   "track_num": 4
+  }
+ ]
+}

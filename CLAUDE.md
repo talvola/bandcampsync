@@ -26,6 +26,7 @@ Package manager is `uv`. Dev dependencies (pytest, pytest-mock, ruff) are in `py
 **Entry points:**
 - `bin/bandcampsync` — CLI script that parses args, reads cookies, calls `do_sync()`
 - `bin/bandcampsync-service` — Docker service runner (scheduled daily sync)
+- `bin/bandcampfree` — CLI for the free/pay-what-you-want label watcher (see below)
 - `bandcampsync/__init__.py` — Public API exposing `do_sync()` and `Syncer`
 
 **Core modules:**
@@ -70,6 +71,51 @@ uv run python bin/bandcampsync \
 - **Ignore file:** `N:\Bandcamp (FLAC)\.bandcamp-ignore` — contains IDs of non-downloadable pages (e.g. submission forms, placeholder pages)
 - **Format:** FLAC
 - **Concurrency:** 3
+- **Manually downloaded items:** The report auto-detects them by name/ID match; no manual tracking needed before syncing.
+- **Report runtime:** ~5 minutes (indexes all local media first). Always run report before full sync.
+
+## Free / Pay-What-You-Want Label Downloader (`bandcampfree`)
+
+A second, independent tool that watches record label pages for free albums. It cannot reuse
+the collection sync: **claiming an album at $0 does not add it to the Bandcamp collection**
+(Bandcamp requires ~€0.50 minimum), so `load_purchases()` never sees these items.
+
+**Modules:** `labels.py` (mobile API client, `FreeAlbum`, classification), `labelconfig.py`
+(YAML + match predicates), `freesync.py` (scan orchestration, `FreeState`, `LabelIndex`,
+report), `freedownload.py` (acquisition + download), `gmail.py` (emailed link retrieval).
+
+```bash
+# Report what would be downloaded (no side effects)
+uv run python bin/bandcampfree -C labels.yaml --report
+
+# One-time Gmail authorisation
+uv run python bin/bandcampfree --gmail-auth
+
+# Download, bounded
+uv run python bin/bandcampfree -C labels.yaml --limit 5 --max-gb 10
+```
+
+**Non-obvious details, all verified against live Bandcamp:**
+
+- Discovery uses the undocumented mobile API (`bandcamp.com/api/mobile/24/band_details` and
+  `tralbum_details`). No HTML scraping — it returns prices, per-track artists and release
+  dates as clean JSON. Scraping `/music` requires unioning static `<li>` elements with a
+  disjoint `data-client-items` blob, and `?page=2` is a no-op.
+- **Free detection:** `price == 0.0 and not is_set_price`. Do **not** gate on
+  `free_download` — that maps to `download_pref == 1` and is False for ordinary
+  name-your-price-at-$0 albums.
+- **`/email_download` requires `country` and `postcode`.** Omitting them returns
+  `"Sorry, this item is no longer available for free."`, which means bad location data, not
+  quota exhaustion. No cookies or reCAPTCHA token are needed.
+- **Compilation detection is per-label; no signal generalises.** Future Avenue uses
+  `Various Artists` with per-track artists; Tadpole Records uses the label as album artist,
+  leaves every track artist null, and encodes it in the title as `Artist : Title`.
+- **Rate limiting is real** — a full scan of a 674-album label hits HTTP 429. `prefilter()`
+  rejects albums using the artist/title from the single `band_details` call before spending
+  a per-album request (674 → 70 for Future Avenue). Keep `request_delay` at 1s or higher.
+- **Scan cutoff is the newest release date already examined**, stored in state — never file
+  mtime, which updates on download and would hide older un-fetched releases. Wanted-but-not-
+  downloaded albums are kept in `state.pending` and reconsidered regardless of cutoff.
 
 ## Key Details
 

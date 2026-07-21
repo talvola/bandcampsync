@@ -30,7 +30,12 @@ class Bandcamp:
         "collection_items": "/api/fancollection/1/collection_items",
     }
 
-    def __init__(self, cookies=""):
+    def __init__(self, cookies="", require_auth=True):
+        """
+        Set require_auth=False for anonymous use. Free and pay-what-you-want downloads
+        are served from signed URLs that do not need an authenticated session, so the
+        free label downloader has no cookies to supply.
+        """
         self.is_authenticated = False
         self.user_id = 0
         self.user_verified = False
@@ -38,14 +43,17 @@ class Bandcamp:
         self.purchases = []
         self.load_cookies(cookies)
         identity = self.cookies.get("identity")
-        if not identity:
+        if not identity and require_auth:
             raise BandcampError(
                 "Cookie data does not contain an identity value, make sure your "
                 "cookies.txt file is valid and you copied it from an "
                 "authenticated browser"
             )
-        identity_snip = identity.value[:20]
-        log.info(f"Located Bandcamp identity in cookies: {identity_snip}...")
+        if identity:
+            identity_snip = identity.value[:20]
+            log.info(f"Located Bandcamp identity in cookies: {identity_snip}...")
+        else:
+            log.info("Using an anonymous Bandcamp session")
         # Create a requests session and map our SimpleCookie to it
         self.session = requests.Session(impersonate="chrome")
         for cookie_name, morsel in self.cookies.items():
@@ -114,18 +122,29 @@ class Bandcamp:
         return cookies
 
     def _request(
-        self, method, url, data=None, json_data=None, is_json=False, as_raw=False
+        self,
+        method,
+        url,
+        data=None,
+        json_data=None,
+        is_json=False,
+        as_raw=False,
+        timeout=None,
     ):
         try:
             # The debug logs do not mask the URL which may be a security issue if you run
             # with level=logging.DEBUG
             log.debug(f"Making {method} request to {url}")
+            kwargs = {}
+            if timeout is not None:
+                kwargs["timeout"] = timeout
             response = self.session.request(
                 method,
                 url,
                 cookies=self._plain_cookies(),
                 data=data,
                 json=json_data,
+                **kwargs,
             )
         except Exception as e:
             raise BandcampError(
@@ -329,7 +348,6 @@ class Bandcamp:
                     continue
                 if item.item_id is None:
                     log.error(
-                        f"Failed to locate download URL for {band_name} / {title} "
                         f'Failed to locate item id for "{item.band_name} / {item.item_title}", skipping item...'
                     )
                     continue
@@ -339,7 +357,9 @@ class Bandcamp:
                 item.download_url = download_url
                 item_key = (item.band_name, item.item_title)
                 items_by_title_key.setdefault(item_key, []).append(item)
-                log.info(f"Found item: {item.band_name} / {item.item_title} (id:{item.item_id})")
+                log.info(
+                    f"Found item: {item.band_name} / {item.item_title} (id:{item.item_id})"
+                )
                 self.purchases.append(item)
 
         # De-duplicate multiple purchases sharing the same artist and title.
@@ -393,11 +413,15 @@ class Bandcamp:
                 return download_url
         raise BandcampDownloadUnavailable("No download available for item")
 
-    def check_download_stat(self, item, file_download_url):
+    def check_download_stat(self, item, file_download_url, timeout=None):
         """
         Constructs the download "stat" URL and verifies the state of the download.
         If the state is OK, return the existing URL (download is OK) otherwise wait
         for the stat to complete and return the new download URL.
+
+        Pass a longer timeout for large archives: bandcamp builds the zip server-side
+        while this request is open, and a multi-gigabyte compilation takes well over the
+        default 30 seconds.
         """
         download_url_parts = urlsplit(file_download_url)
         path = download_url_parts.path
@@ -413,7 +437,7 @@ class Bandcamp:
                 "",
             )
         )
-        body = self._request("get", stat_url, as_raw=True)
+        body = self._request("get", stat_url, as_raw=True, timeout=timeout)
         return self._get_js_stat_url(body, file_download_url)
 
 

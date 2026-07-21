@@ -1,0 +1,49 @@
+# Configuration for bandcampfree, the free / pay-what-you-want label watcher.
+#
+# Scanning: the first time a label is scanned there is no date cutoff, so the whole back
+# catalogue is examined to catch anything missed during manual downloading. Afterwards the
+# cutoff defaults to the newest file modification time in the label's local directory. Set
+# "since" to override that, or pass --full-scan to ignore cutoffs entirely.
+
+defaults:
+  media_dir: "N:/Bandcamp (FLAC)"
+  format: flac
+  # Used for albums that require an email address to receive the download link.
+  email: you@example.com
+  country: US
+  postcode: "12345"
+  # Seconds between API requests. Bandcamp returns HTTP 429 if pushed; a full first
+  # scan of a large label issues hundreds of requests, so keep this at 1s or higher.
+  request_delay: 1.0
+
+labels:
+  # Compilations are tagged with an album artist of "Various Artists" and each track
+  # carries its own artist, so both signals are available.
+  - name: Future Avenue
+    url: https://futureavenuelabel.bandcamp.com/
+    band_id: 2509431535
+    match:
+      various_artists: true
+      track_artists_vary: true
+    enabled: true
+
+  # A counter-example: the album artist is the label itself and every track artist is
+  # null, with the real artist encoded in the track title as "Artist : Title". The rules
+  # that work for Future Avenue would match nothing here.
+  - name: Tadpole Records
+    url: https://tadpolerecords.bandcamp.com/
+    band_id: 2942737017
+    match:
+      title_separator: " : "
+      min_tracks: 10
+    enabled: true
+
+  # A label with few releases where every free album is wanted: omit "match" entirely.
+  # - name: Example Label
+  #   url: https://examplelabel.bandcamp.com/
+  #   enabled: true
+
+  # A dormant label kept for reference but not scanned.
+  # - name: Defunct Label
+  #   url: https://defunctlabel.bandcamp.com/
+  #   enabled: false

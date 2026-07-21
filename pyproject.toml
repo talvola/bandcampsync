@@ -12,6 +12,7 @@ license-files = ["LICENSE",]
 dependencies = [
     "beautifulsoup4>=4.14.3",
     "curl-cffi>=0.14.0",
+    "pyyaml>=6.0",
 ]
 keywords = [
   "bandcampsync",
@@ -25,6 +26,14 @@ classifiers = [
   "Programming Language :: Python",
   "Programming Language :: Python :: 3",
   "Topic :: Software Development :: Libraries :: Python Modules",
+]
+
+[project.optional-dependencies]
+# Only needed for retrieving download links for albums that require an email address.
+# The core sync tool does not need these.
+gmail = [
+    "google-auth>=2.30.0",
+    "google-auth-oauthlib>=1.2.0",
 ]
 
 [project.urls]
