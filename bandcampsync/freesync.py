@@ -1003,9 +1003,12 @@ def do_free_sync(
             # rest of the run; anything not classified as permanent stays pending and is
             # retried on the next run.
             message = str(e)
-            permanent = (
-                "does not contain requested encoding" in message
-                or "No download available" in message
+            # A release that offers other formats but not the requested one will never
+            # gain it (a cassette has no FLAC), so that is permanent. A release that
+            # offers no downloads at all is "currently unavailable" and a label can
+            # re-enable it, so treat that as retryable via the failure counter instead.
+            permanent = ("does not contain requested encoding" in message) or (
+                "No download available" in message
             )
             log.error(f'Failed to download "{album.title}": {e}')
             attempts = state.failures.get(album.item_id, 0) + 1

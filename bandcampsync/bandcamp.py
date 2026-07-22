@@ -395,10 +395,20 @@ class Bandcamp:
                         "Failed to parse pagedata JSON, does not contain an "
                         '"digital_items.downloads" key'
                     ) from e
+                if not downloads:
+                    # An empty downloads dict means the release itself is not available
+                    # for download right now - bandcamp serves the page but the item is
+                    # marked not-ready / "currently unavailable". That can be temporary
+                    # (a label can re-enable it), so it is distinct from a release that
+                    # offers other formats but not the one requested.
+                    raise BandcampDownloadUnavailable(
+                        f"Release offers no downloads (id {digital_item_id}); it may be "
+                        f"temporarily unavailable"
+                    )
                 try:
                     download_format = downloads[encoding]
                 except KeyError as e:
-                    encodings = downloads.keys()
+                    encodings = list(downloads.keys())
                     raise BandcampError(
                         f"Download formats does not contain requested encoding: {encoding} "
                         f"(available encodings: {encodings})"

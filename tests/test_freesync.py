@@ -960,3 +960,46 @@ def test_fetch_details_returns_none_when_truly_gone(monkeypatch):
             return {"id": None, "title": ""}
 
     assert freesync._fetch_details_any_type(_API(), 1, 999, None, "L") is None
+
+
+def test_unavailable_release_is_retryable_not_permanent(tmp_path, monkeypatch):
+    """A release with an empty downloads dict is "currently unavailable" (Valentine
+    Records pulled several while their listings stayed live). A label can re-enable it,
+    so it must retry via the counter rather than being written off on the first failure
+    like a genuinely FLAC-less cassette."""
+    from bandcampsync import freesync
+
+    config, state_path = _sync_env(tmp_path, [1])
+
+    def unavailable(album, spec, cfg, gmail, temp_dir):
+        raise ValueError(
+            "Release offers no downloads (id 1); it may be temporarily unavailable"
+        )
+
+    monkeypatch.setattr("bandcampsync.freedownload.acquire_album", unavailable)
+
+    freesync.do_free_sync(config, state_path, pending_only=True)
+    state = freesync.FreeState(state_path)
+    assert 1 in state.pending, "an unavailable release must stay queued, not be skipped"
+    assert 1 not in state.skipped
+    assert state.failures.get(1) == 1
+
+
+def test_missing_format_is_permanent(tmp_path, monkeypatch):
+    """A release offering other formats but not FLAC (a cassette) will never gain it."""
+    from bandcampsync import freesync
+
+    config, state_path = _sync_env(tmp_path, [2])
+
+    def no_flac(album, spec, cfg, gmail, temp_dir):
+        raise ValueError(
+            "Download formats does not contain requested encoding: flac "
+            "(available encodings: ['mp3-320', 'aac-hi'])"
+        )
+
+    monkeypatch.setattr("bandcampsync.freedownload.acquire_album", no_flac)
+
+    freesync.do_free_sync(config, state_path, pending_only=True)
+    state = freesync.FreeState(state_path)
+    assert 2 not in state.pending
+    assert 2 in state.skipped
