@@ -932,6 +932,70 @@ def test_track_target_path_is_built_from_metadata(tmp_path):
     assert path == tmp_path / "L" / "SECRET AGENT - Rat Salad"
 
 
+def test_target_path_strips_path_separators_from_metadata(tmp_path):
+    """The real VATERLAND case: a track whose artist contains "/" must not turn that into
+    a directory separator. Windows rejects the resulting path outright, and on any OS it
+    would silently nest the release one level too deep."""
+    from bandcampsync.freedownload import _target_path
+
+    track = FreeAlbum(
+        item_id=2890937455,
+        title="FTR-WEB 052: x-24-cx [Joy Division cover]",
+        artist="Союз Дахау / Dachau Union",
+        url="",
+        price=0.0,
+        is_set_price=False,
+        require_email=False,
+        free_download=False,
+        num_tracks=1,
+        item_type="t",
+    )
+    path = _target_path(tmp_path, "VATERLAND", track, None)
+    assert path.parent == tmp_path / "VATERLAND"
+    assert "/" not in path.name and "\\" not in path.name and ":" not in path.name
+
+
+def test_target_path_cleans_zip_stem_and_label(tmp_path):
+    """Album downloads take the zip-filename branch, which must be cleaned too - dedup
+    matches local directories by name, so it has to agree with LocalMedia._clean_path."""
+    from bandcampsync.freedownload import _target_path
+
+    album = FreeAlbum(
+        item_id=5,
+        title="T",
+        artist="A",
+        url="",
+        price=0.0,
+        is_set_price=False,
+        require_email=False,
+        free_download=False,
+        num_tracks=3,
+        item_type="a",
+    )
+    path = _target_path(tmp_path, "L", album, "AC/DC - Vol: One.zip")
+    assert path == tmp_path / "L" / "ACDC - Vol One"
+
+
+def test_target_path_falls_back_to_item_id_when_name_cleans_to_empty(tmp_path):
+    """A name made entirely of stripped characters must not yield the label directory."""
+    from bandcampsync.freedownload import _target_path
+
+    track = FreeAlbum(
+        item_id=77,
+        title="???",
+        artist="///",
+        url="",
+        price=0.0,
+        is_set_price=False,
+        require_email=False,
+        free_download=False,
+        num_tracks=1,
+        item_type="t",
+    )
+    path = _target_path(tmp_path, "L", track, None)
+    assert path == tmp_path / "L" / "77"
+
+
 def test_fetch_details_falls_back_to_track_type(monkeypatch):
     """The real SECRET AGENT Rat Salad case: the id only answers as a track. Querying it
     as an album returns an empty payload that mimics a delisted item."""

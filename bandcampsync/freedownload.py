@@ -28,7 +28,7 @@ from curl_cffi import requests
 from .bandcamp import Bandcamp, BandcampError, BandcampItem
 from .download import download_file, is_zip_file, move_file, unzip_file
 from .logger import get_logger
-from .media import parse_zip_filename
+from .media import clean_path_component, parse_zip_filename
 
 log = get_logger("freedownload")
 
@@ -170,19 +170,23 @@ def _target_path(media_dir, label_name, album, content_filename):
     grouping directory. A standalone track arrives as a bare audio file rather than an
     archive, so its directory is built from the metadata instead.
     """
+    def clean(raw):
+        # Clean first, then strip: the cleaning can expose leading/trailing separators
+        # that were previously hidden behind an illegal character.
+        return clean_path_component(raw).strip(" -") or str(album.item_id)
+
     media_dir = Path(media_dir)
+    label_dir = media_dir / clean_path_component(label_name)
     if getattr(album, "item_type", "a") in ("t", "track"):
-        name = f"{album.artist} - {album.title}".strip(" -") or str(album.item_id)
-        return media_dir / label_name / name
+        return label_dir / clean(f"{album.artist} - {album.title}")
     if content_filename:
         zip_artist, zip_album = parse_zip_filename(content_filename)
         if zip_artist and zip_album:
             stem = content_filename
             if stem.lower().endswith(".zip"):
                 stem = stem[:-4]
-            return media_dir / label_name / stem
-    fallback = f"{album.artist} - {album.title}".strip(" -")
-    return media_dir / label_name / fallback
+            return label_dir / clean(stem)
+    return label_dir / clean(f"{album.artist} - {album.title}")
 
 
 def stat_download(bc, item, file_url, attempts=3, timeout=300, wait=20):

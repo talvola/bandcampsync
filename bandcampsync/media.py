@@ -7,6 +7,24 @@ from .logger import get_logger
 log = get_logger("media")
 
 
+def clean_path_component(path_str):
+    """Strip characters that are illegal or awkward in a directory name.
+
+    Shared by the local media indexer and the free-album downloader so both derive the
+    same directory name for a release - dedup matches local directories by name, so the
+    two must agree exactly.
+    """
+    path_str = str(path_str)
+    disallowed_punctuation = "\"#%'*/?\\`:"
+    normalized_path = normalize("NFKD", path_str)
+    outstr = ""
+    for c in normalized_path:
+        if c not in disallowed_punctuation:
+            outstr += c
+    # Windows silently strips trailing dots and spaces from directory names
+    return outstr.rstrip(". ")
+
+
 def parse_zip_filename(filename):
     """Split 'Artist - Album.zip' into (artist, album).
 
@@ -59,15 +77,7 @@ class LocalMedia:
             self.index()
 
     def _clean_path(self, path_str):
-        path_str = str(path_str)
-        disallowed_punctuation = "\"#%'*/?\\`:"
-        normalized_path = normalize("NFKD", path_str)
-        outstr = ""
-        for c in normalized_path:
-            if c not in disallowed_punctuation:
-                outstr += c
-        # Windows silently strips trailing dots and spaces from directory names
-        return outstr.rstrip(". ")
+        return clean_path_component(path_str)
 
     def clean_format(self, format_str):
         if "-" not in format_str:
