@@ -117,6 +117,31 @@ uv run python bin/bandcampfree -C labels.yaml --limit 5 --max-gb 10
   mtime, which updates on download and would hide older un-fetched releases. Wanted-but-not-
   downloaded albums are kept in `state.pending` and reconsidered regardless of cutoff.
 
+**Adding new labels (the recurring task):** Erik hands over batches of ~10-12 label names.
+Vet each with `C:/Users/erik/.bandcampfree/probe_labels.py "Name" ...` (resolves subdomain
+from the search API's `item_url_root`, band_id, catalogue size, VA count, a newest-~14
+sample, and the FULL comp-ish title list), show him counts + samples to catch wrong pages,
+then add with a per-label comment and scan with `--report -l "Name"`. Full operational
+detail (with the gotchas) is in the project memory `adding-new-labels-workflow.md`.
+
+**Match-rule selection** (rules live in `labelconfig.py`; all ANDed; empty = take all free):
+- `min_track_artists: N, min_tracks: M` — multi-artist comps whose tracks carry real
+  per-track artists (most comps). Lower `min_tracks` to ~6 for short comps.
+- `track_artists_vary: true` — small comps/splits (2-4 distinct artists) that `min_track_artists: 5` would reject.
+- `various_artists: true` — comps credited to "Various Artists"; **prefilters** on cheap
+  `band_details`, so essential for large catalogues.
+- `title_regex: "(?i)..."` — label-credited comp *series* (tracks show `distinct == 1`, so
+  artist-count rules fail): samplers, tributes, "compilation". Also prefilters.
+- empty `{}` — every release is a comp, or comps are label-credited (distinct=1) and can't
+  be told apart by rule.
+
+**Two more verified gotchas:**
+- "free download" / "(Free Sampler)" in a *title* does NOT imply `price == 0` — several
+  labels title samplers that way but charge for them. Gate on price, never the title.
+- Same-titled comp series (e.g. Wiretap's ~15 identical "ATTENTION!" titles) collide in the
+  `Artist - Title` folder scheme and overwrite each other on extract — never bulk-download
+  them; watch-for-new via a high-water mark instead (see `wiretap-same-title-collision.md`).
+
 ## Key Details
 
 - Python 3.10+ required (`.python-version` specifies 3.10)
