@@ -25,6 +25,40 @@ def clean_path_component(path_str):
     return outstr.rstrip(". ")
 
 
+# Characters Windows forbids in a path component, plus the separators. Deliberately a
+# much smaller set than clean_path_component's: apostrophes and accented letters are
+# legal everywhere we target and are kept so the directory reads naturally.
+_WINDOWS_ILLEGAL_PATH_CHARS = '<>:"/\\|?*'
+
+
+def clean_label_dir_name(label_name):
+    """Derive a label's grouping directory name from its configured name.
+
+    Narrower than clean_path_component on purpose, and NOT interchangeable with it.
+    This name is derived independently in two places - LabelIndex when it looks for
+    already-downloaded albums, and _target_path when it writes new ones - so the two must
+    agree exactly or dedup silently fails and the label's entire catalogue downloads
+    again. That is precisely what happened to "What Do You Know About Ska Punk?": the
+    downloader stripped the "?" but the indexer did not, so it searched a path that cannot
+    exist on Windows, indexed nothing, and queued all 10 comps (~30 GB) as missing.
+
+    Only characters Windows actually forbids are removed, because the existing on-disk
+    label directories keep their apostrophes ("Don't Panic Records & Distro"). Accents are
+    normalised to NFC rather than decomposed, since those directories are NFC and NTFS
+    compares filenames without normalising - a decomposed name creates a second, separate
+    directory next to the composed one.
+    """
+    name = normalize("NFC", str(label_name))
+    cleaned = "".join(
+        c for c in name if c not in _WINDOWS_ILLEGAL_PATH_CHARS and ord(c) >= 32
+    )
+    # Windows silently strips trailing dots and spaces from directory names
+    cleaned = cleaned.rstrip(". ")
+    # Never fall back to an empty component - that would place albums directly in the
+    # media root instead of under the label.
+    return cleaned or "unknown-label"
+
+
 def parse_zip_filename(filename):
     """Split 'Artist - Album.zip' into (artist, album).
 
