@@ -85,15 +85,15 @@ the collection sync: **claiming an album at $0 does not add it to the Bandcamp c
 report), `freedownload.py` (acquisition + download), `gmail.py` (emailed link retrieval).
 
 ```bash
-# Report what would be downloaded (no side effects)
-uv run python bin/bandcampfree -C labels.yaml --report
+# Config/state/creds/scripts live on N: — pass all four flags or they default back to C:
+FREE="-C N:/bandcampfree/labels.yaml -s N:/bandcampfree/state.json \
+  --client-secret N:/bandcampfree/client_secret.json --token N:/bandcampfree/token.json"
 
-# One-time Gmail authorisation
-uv run python bin/bandcampfree --gmail-auth
-
-# Download, bounded
-uv run python bin/bandcampfree -C labels.yaml --limit 5 --max-gb 10
+uv run python bin/bandcampfree $FREE -t N:/_bcf_temp --report        # no side effects
+uv run python bin/bandcampfree $FREE -t N:/_bcf_temp --pending-only --max-gb 15
+uv run python bin/bandcampfree --gmail-auth                          # one-time
 ```
+`-t N:/_bcf_temp` is required for any sizeable run — C: fills unpredictably.
 
 **Non-obvious details, all verified against live Bandcamp:**
 
@@ -116,9 +116,14 @@ uv run python bin/bandcampfree -C labels.yaml --limit 5 --max-gb 10
 - **Scan cutoff is the newest release date already examined**, stored in state — never file
   mtime, which updates on download and would hide older un-fetched releases. Wanted-but-not-
   downloaded albums are kept in `state.pending` and reconsidered regardless of cutoff.
+- **Label directory names must be derived by `media.clean_label_dir_name` on BOTH sides** —
+  `freesync.LabelIndex.__init__` and `freedownload._target_path`. It is narrower than
+  `clean_path_component` (which `LocalMedia` shares — do not widen that one). Diverging made
+  a label's whole catalogue re-download. Keep every label `name:` path-safe (no `? : * " < > |`).
 
 **Adding new labels (the recurring task):** Erik hands over batches of ~10-12 label names.
-Vet each with `C:/Users/erik/.bandcampfree/probe_labels.py "Name" ...` (resolves subdomain
+Vet each with `N:/bandcampfree/probe_labels.py "Name" ...` (deep-check candidates with
+`N:/bandcampfree/deepcheck.py "Label=BAND_ID"`; resolves subdomain
 from the search API's `item_url_root`, band_id, catalogue size, VA count, a newest-~14
 sample, and the FULL comp-ish title list), show him counts + samples to catch wrong pages,
 then add with a per-label comment and scan with `--report -l "Name"`. Full operational
@@ -127,13 +132,29 @@ detail (with the gotchas) is in the project memory `adding-new-labels-workflow.m
 **Match-rule selection** (rules live in `labelconfig.py`; all ANDed; empty = take all free):
 - `min_track_artists: N, min_tracks: M` — multi-artist comps whose tracks carry real
   per-track artists (most comps). Lower `min_tracks` to ~6 for short comps.
+  **False-positives on crew albums** where each track credits a different permutation of the same
+  3-4 people (distinct=11 off a 3-person roster) — inspect per-track `band_name`s before downloading.
 - `track_artists_vary: true` — small comps/splits (2-4 distinct artists) that `min_track_artists: 5` would reject.
 - `various_artists: true` — comps credited to "Various Artists"; **prefilters** on cheap
   `band_details`, so essential for large catalogues.
+  Because it prefilters it **hides free comps that are not VA-credited** — if the probe shows a
+  free title absent from the comp-ish list, use `{}` or `title_regex` instead (Sahel: 14 VA comps
+  all paid, the one free item label-credited, so the rule returned nothing).
+  Labels often credit comps several ways at once (`Various Artists`/`V/A`/`V.A.`/label) — match on title.
 - `title_regex: "(?i)..."` — label-credited comp *series* (tracks show `distinct == 1`, so
   artist-count rules fail): samplers, tributes, "compilation". Also prefilters.
+  **Anchor short generic alternatives** — a bare `dark` matched a solo EP "N3.0_Dark"; use `dark4`.
+  In YAML, single-quote regexes containing backslashes: `'(?i)e\.b\.m\.'` (double quotes reject `\.`).
 - empty `{}` — every release is a comp, or comps are label-credited (distinct=1) and can't
   be told apart by rule.
+
+**Expect near-total dedup.** Erik's collection already holds most free comps — batches routinely
+report 37/39 or 68/79 already downloaded. Always `--report` first, and check the label directory on
+disk (with a *loose* substring) before quoting any size estimate.
+
+**Estimate runtime from the `[needs email]` count, not item count or GB.** An emailed-link item
+costs ~5-8 min of Gmail polling before any bytes move; direct links take ~1-2 min. Measured: 18
+items/4 email = 23 min; 6 items/3 email = 46 min.
 
 **Two more verified gotchas:**
 - "free download" / "(Free Sampler)" in a *title* does NOT imply `price == 0` — several
