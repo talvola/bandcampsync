@@ -335,3 +335,48 @@ def test_normalize_handles_tabs_and_newlines():
     n = LocalMedia._normalize_for_match
     assert n("A\tB") == n("A B")
     assert n("  leading and trailing  ") == "leading and trailing"
+
+
+def test_clean_label_dir_name_strips_only_windows_illegal_characters():
+    from bandcampsync.media import clean_label_dir_name
+
+    assert clean_label_dir_name("What Do You Know About Ska Punk?") == (
+        "What Do You Know About Ska Punk"
+    )
+    assert clean_label_dir_name(r'A<B>C:D"E/F\G|H?I*J') == "ABCDEFGHIJ"
+    # Apostrophes and accents are legal and must survive - the existing library uses them.
+    assert clean_label_dir_name("Don't Panic Records & Distro") == (
+        "Don't Panic Records & Distro"
+    )
+    assert clean_label_dir_name("Memphis Concr\u00e8te") == "Memphis Concr\u00e8te"
+
+
+def test_clean_label_dir_name_composes_accents_to_nfc():
+    """NTFS compares filenames without normalising, so a decomposed name would create a
+    second directory beside the composed one rather than matching it."""
+    from bandcampsync.media import clean_label_dir_name
+
+    decomposed = "Memphis Concre\u0300te"
+    assert clean_label_dir_name(decomposed) == "Memphis Concr\u00e8te"
+    assert clean_label_dir_name(decomposed) == clean_label_dir_name(
+        "Memphis Concr\u00e8te"
+    )
+
+
+def test_clean_label_dir_name_never_returns_empty():
+    """An empty component would place albums in the media root instead of the label dir."""
+    from bandcampsync.media import clean_label_dir_name
+
+    assert clean_label_dir_name("???") == "unknown-label"
+    assert clean_label_dir_name("  . ") == "unknown-label"
+
+
+def test_clean_label_dir_name_is_narrower_than_clean_path_component():
+    """They are not interchangeable: clean_path_component also strips apostrophes, #, %
+    and decomposes accents, which is correct for album names but would orphan the
+    existing label directories."""
+    from bandcampsync.media import clean_label_dir_name, clean_path_component
+
+    name = "Don't Panic Records & Distro"
+    assert clean_path_component(name) == "Dont Panic Records & Distro"
+    assert clean_label_dir_name(name) == name

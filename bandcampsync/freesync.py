@@ -32,7 +32,7 @@ from .labels import (
     list_discography,
 )
 from .logger import get_logger
-from .media import LocalMedia
+from .media import LocalMedia, clean_label_dir_name
 
 log = get_logger("freesync")
 
@@ -186,7 +186,10 @@ class LabelIndex:
     """
 
     def __init__(self, media_dir, label_name):
-        self.dir = Path(media_dir) / label_name
+        # Must use the same derivation as freedownload._target_path, or this index looks
+        # in a directory the downloader never writes to and every album reports as
+        # missing. See clean_label_dir_name for the failure this prevents.
+        self.dir = Path(media_dir) / clean_label_dir_name(label_name)
         self.by_id = {}
         # Titles are NOT unique: The Audio Atelier has four distinct releases all called
         # "Best of 2025 (Free Download)". Keyed by a plain dict, later directories would

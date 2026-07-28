@@ -1067,3 +1067,59 @@ def test_missing_format_is_permanent(tmp_path, monkeypatch):
     state = freesync.FreeState(state_path)
     assert 2 not in state.pending
     assert 2 in state.skipped
+
+
+def test_label_index_finds_albums_when_label_name_has_illegal_char(tmp_path):
+    """The "What Do You Know About Ska Punk?" regression.
+
+    The downloader strips the "?" when building the label directory, so the on-disk name
+    has none. LabelIndex used the raw configured name, producing a path that cannot exist
+    on Windows: it indexed nothing and reported every album as missing, queueing ~30 GB
+    of albums that were already on disk.
+    """
+    label_dir = tmp_path / "What Do You Know About Ska Punk"
+    (label_dir / "V-A - What Do You Know About Ska Punk- Vol. 1").mkdir(parents=True)
+
+    index = LabelIndex(tmp_path, "What Do You Know About Ska Punk?")
+
+    on_disk = _album(item_id=1, title="What Do You Know About Ska Punk? Vol. 1")
+    assert index.find(on_disk)[0] is not None
+
+
+def test_label_index_and_target_path_agree_on_label_dir(tmp_path):
+    """The two derive the label directory independently; they must not diverge again."""
+    from bandcampsync.freedownload import _target_path
+
+    album = FreeAlbum(
+        item_id=5,
+        title="T",
+        artist="A",
+        url="",
+        price=0.0,
+        is_set_price=False,
+        require_email=False,
+        free_download=False,
+        num_tracks=3,
+        item_type="a",
+    )
+    for label_name in (
+        "What Do You Know About Ska Punk?",
+        "Don't Panic Records & Distro",
+        "Memphis Concr\u00e8te",
+        "Les Acteurs de L'Ombre Productions",
+        "Facthedral's Hall",
+        "\u30d4\u30f3\u30af\u30cd\u30aa\u30f3\u6771\u4eac",
+    ):
+        written = _target_path(tmp_path, label_name, album, "A - T.zip").parent
+        looked_up = LabelIndex(tmp_path, label_name).dir
+        assert written == looked_up, label_name
+
+
+def test_label_dir_keeps_apostrophes_so_existing_directories_still_match(tmp_path):
+    """Apostrophes are legal on disk and the existing library uses them. Stripping them
+    (as clean_path_component does) would orphan every album already downloaded."""
+    label_dir = tmp_path / "Don't Panic Records & Distro"
+    (label_dir / "Various Artists - DeKalb Brawl City").mkdir(parents=True)
+
+    index = LabelIndex(tmp_path, "Don't Panic Records & Distro")
+    assert index.find(_album(item_id=2, title="DeKalb Brawl City"))[0] is not None

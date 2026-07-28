@@ -28,7 +28,7 @@ from curl_cffi import requests
 from .bandcamp import Bandcamp, BandcampError, BandcampItem
 from .download import download_file, is_zip_file, move_file, unzip_file
 from .logger import get_logger
-from .media import clean_path_component, parse_zip_filename
+from .media import clean_label_dir_name, clean_path_component, parse_zip_filename
 
 log = get_logger("freedownload")
 
@@ -176,7 +176,10 @@ def _target_path(media_dir, label_name, album, content_filename):
         return clean_path_component(raw).strip(" -") or str(album.item_id)
 
     media_dir = Path(media_dir)
-    label_dir = media_dir / clean_path_component(label_name)
+    # Label grouping dir uses the narrower cleaner, matched by LabelIndex. The album
+    # directory below still uses clean_path_component, which LocalMedia._normalize_for_match
+    # compares leniently.
+    label_dir = media_dir / clean_label_dir_name(label_name)
     if getattr(album, "item_type", "a") in ("t", "track"):
         return label_dir / clean(f"{album.artist} - {album.title}")
     if content_filename:
