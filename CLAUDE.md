@@ -128,6 +128,15 @@ from the search API's `item_url_root`, band_id, catalogue size, VA count, a newe
 sample, and the FULL comp-ish title list), show him counts + samples to catch wrong pages,
 then add with a per-label comment and scan with `--report -l "Name"`. Full operational
 detail (with the gotchas) is in the project memory `adding-new-labels-workflow.md`.
+**Run probes SERIALLY** — two concurrent probes hit HTTP 429, which surfaces as
+`JSONDecodeError: Expecting value: line 1 column 1` (an HTML error page) and silently truncates
+a label's output. Recover with `deepcheck.py`, which retries with backoff. Do not pass `--url`
+for a label search can already find: that path leaves `band_id=None` and every fetch fails.
+**For a BULK unvetted list (30+ scraped names), triage first:** `triage_labels.py <file>` spends
+2 requests/label (vs ~15) and marks SKIP for labels with no comp-ish titles and no VA credits;
+then price only survivors with `deepcheck.py --max 6`. Expect near-zero yield — a 66-label
+post-punk/goth list gave 1 usable label, because commercial vinyl labels sell their comps
+($7 flat at Echozone, $10 at Goth City). See `commercial-labels-have-no-free-comps.md`.
 
 **Match-rule selection** (rules live in `labelconfig.py`; all ANDed; empty = take all free):
 - `min_track_artists: N, min_tracks: M` — multi-artist comps whose tracks carry real
@@ -141,6 +150,10 @@ detail (with the gotchas) is in the project memory `adding-new-labels-workflow.m
   free title absent from the comp-ish list, use `{}` or `title_regex` instead (Sahel: 14 VA comps
   all paid, the one free item label-credited, so the rule returned nothing).
   Labels often credit comps several ways at once (`Various Artists`/`V/A`/`V.A.`/label) — match on title.
+  **The predicate is anchored and English-only**: it matches only `Various Artists`/`Various Artist`/
+  `V/A`/`V.A.` — NOT bare `Various`, `VA`, `VARIOUS ARTISTS!` (trailing punctuation), `VV.AA.`,
+  `Varios Artistas`, or `AAVV`. Read the probe's actual credit string; use `title_regex` when it
+  is any of those (hit on Paranoia Musique, pomogite, WORLD END COLLAPSE, Munster, Dorog).
 - `title_regex: "(?i)..."` — label-credited comp *series* (tracks show `distinct == 1`, so
   artist-count rules fail): samplers, tributes, "compilation". Also prefilters.
   **Anchor short generic alternatives** — a bare `dark` matched a solo EP "N3.0_Dark"; use `dark4`.
@@ -152,11 +165,34 @@ detail (with the gotchas) is in the project memory `adding-new-labels-workflow.m
 report 37/39 or 68/79 already downloaded. Always `--report` first, and check the label directory on
 disk (with a *loose* substring) before quoting any size estimate.
 
-**Estimate runtime from the `[needs email]` count, not item count or GB.** An emailed-link item
-costs ~5-8 min of Gmail polling before any bytes move; direct links take ~1-2 min. Measured: 18
-items/4 email = 23 min; 6 items/3 email = 46 min.
+**Estimate runtime from ITEM COUNT at 1-6 min each — the spread is Bandcamp-side, so quote a
+range.** Measured: 9 items/50 min and 8/53 min one evening, 12 items/18 min the next morning,
+same machine. `[needs email]` is no longer the driver (Gmail resolves in <1 min now); GB and
+track count predict nothing (a 6-track album was 1.15 GB, a 20-track comp 0.46 GB).
 
-**Two more verified gotchas:**
+**Recurring sweep (set up 2026-07-28).** Scheduled task **"BandcampFree Weekly Sweep"** runs
+`N:\bandcampfree\weekly-report.ps1` daily at 03:15; it does a report-only scan of all labels
+only when ~7 days have passed (`reports\.last-success` stamp). Report-only by design — Erik
+approves before any download. Output lands in `N:\bandcampfree\reports\`, one summary line per
+run in `sweep.log`, and **a sweep that finds nothing writes no report file**. A daily trigger
+plus the due-check is the retry mechanism: when N: is unmounted the run logs a SKIP, exits 0
+and leaves the stamp alone, so it retries tomorrow. Guards: share reachable, sweep due, and no
+other bandcampfree process running (`scan_all()` rewrites `state.json`, so an overlapping
+manual download would corrupt the pending queue). Downloads stay manual:
+`--pending-only --max-gb N`.
+
+**`--report` writes state.** `generate_free_report()` has no `state.save()`, but `scan_all()`
+inside it does — a report advances each label's `newest_release_seen` cutoff and fills
+`state.pending`. That is what lets a later `--pending-only` run download without rescanning.
+
+**More verified gotchas:**
+- **Directory names truncate at 64 chars and zero-width spaces count.** Cityman's
+  `ＩＳＵＺＵ　ＰＩＡＺＺＡ` landed with 28 U+200B of its 64 chars, cut mid-word. Cosmetic only —
+  `bandcamp_item_id.txt` still keys dedup, so it will not re-download (the My Grito duplicate
+  happened because the *pre-existing* copy had no id file). Shell globs can't match these dirs.
+- Free **pre-releases** (future release date) download fine; `freedownload` needs no
+  `is_preorder` check, unlike the collection syncer. Transient `curl (56)` failures leave the
+  item in `pending` — just re-run `--pending-only`.
 - "free download" / "(Free Sampler)" in a *title* does NOT imply `price == 0` — several
   labels title samplers that way but charge for them. Gate on price, never the title.
 - Same-titled comp series (e.g. Wiretap's ~15 identical "ATTENTION!" titles) collide in the
