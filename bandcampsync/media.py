@@ -13,9 +13,17 @@ def clean_path_component(path_str):
     Shared by the local media indexer and the free-album downloader so both derive the
     same directory name for a release - dedup matches local directories by name, so the
     two must agree exactly.
+
+    Widening this set is normally forbidden, because a name that stops matching orphans
+    the directory already on disk and the album downloads again. "|<>" are the exception:
+    Windows and SMB refuse to create a path component containing them, so no directory
+    that ever landed on disk can contain one and no existing name can change. They were
+    added 2026-08-06 after Flowerpot Records' "12|21" failed with WinError 123 - it was
+    the only failure in a 207-album run, and clean_label_dir_name had been stripping
+    these all along via _WINDOWS_ILLEGAL_PATH_CHARS.
     """
     path_str = str(path_str)
-    disallowed_punctuation = "\"#%'*/?\\`:"
+    disallowed_punctuation = "\"#%'*/?\\`:|<>"
     normalized_path = normalize("NFKD", path_str)
     outstr = ""
     for c in normalized_path:
