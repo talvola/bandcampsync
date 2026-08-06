@@ -6,6 +6,15 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 BandcampSync is a Python CLI tool (and Docker service) that synchronizes music purchased on Bandcamp with a local directory. It authenticates via exported session cookies, indexes local media and remote purchases, then downloads missing items (defaulting to FLAC format).
 
+**This repo is standalone.** It began as a fork of `meeb/bandcampsync` and left the fork network
+on 2026-08-06, having diverged by 33 commits / 43 files (+7,659 −1,406) — the whole `bandcampfree`
+tool does not exist upstream. **All PRs target `talvola/bandcampsync`**; `gh repo set-default` is
+set to it. Before detaching, `gh pr create` silently defaulted to the parent and opened a PR on
+meeb's repo that carried the entire fork as its diff — 34 files over 34 commits — and was closed
+as unreviewable. The `upstream` remote is deliberately kept: `git fetch upstream` still works for
+picking up meeb's fixes (currently 30 commits ahead of us), but contributing *back* would now need
+a fresh fork, since a detached repo cannot open a PR into the network it left.
+
 ## Common Commands
 
 ```bash
