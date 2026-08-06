@@ -371,6 +371,27 @@ def test_clean_label_dir_name_never_returns_empty():
     assert clean_label_dir_name("  . ") == "unknown-label"
 
 
+def test_clean_path_component_strips_windows_illegal_characters():
+    """A pipe or angle bracket in a title made an unwritable path: Flowerpot Records'
+    "12|21" failed with WinError 123 mid-run. Windows cannot create these at all, so
+    stripping them cannot orphan an existing directory."""
+    from bandcampsync.media import clean_path_component
+
+    assert clean_path_component("12|21") == "1221"
+    assert clean_path_component("<i> hate </i> markup") == "i hate i markup"
+    for char in '|<>':
+        assert char not in clean_path_component(f"a{char}b")
+
+
+def test_clean_path_component_covers_every_windows_illegal_character():
+    """clean_path_component must strip at least what clean_label_dir_name does, or the
+    album directory is unwritable inside a label directory that was fine."""
+    from bandcampsync.media import _WINDOWS_ILLEGAL_PATH_CHARS, clean_path_component
+
+    for char in _WINDOWS_ILLEGAL_PATH_CHARS:
+        assert clean_path_component(f"before{char}after") == "beforeafter"
+
+
 def test_clean_label_dir_name_is_narrower_than_clean_path_component():
     """They are not interchangeable: clean_path_component also strips apostrophes, #, %
     and decomposes accents, which is correct for album names but would orphan the
