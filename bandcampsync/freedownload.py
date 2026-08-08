@@ -170,6 +170,7 @@ def _target_path(media_dir, label_name, album, content_filename):
     grouping directory. A standalone track arrives as a bare audio file rather than an
     archive, so its directory is built from the metadata instead.
     """
+
     def clean(raw):
         # Clean first, then strip: the cleaning can expose leading/trailing separators
         # that were previously hidden behind an illegal character.
@@ -289,17 +290,24 @@ def extract_missing(zip_path, local_path, max_additions=None):
 
 
 def repair_album(album, spec, config, local_path, gmail_reader=None, temp_dir=None):
-    """Fetch an album's archive and add only the files missing from local_path."""
+    """Fetch an album's archive and add only the files missing from local_path.
+
+    gmail_reader may be a GmailReader or a zero-argument callable returning one, matching
+    acquire_album. Whether a link arrives by email is decided by /email_download at request
+    time, not by the album's require_email flag - PRF's back catalogue reports False and
+    still answers with no direct URL - so the reader must be available regardless of it.
+    """
     url = request_download(
         spec.subdomain_url, album, config.email, config.country, config.postcode
     )
     if url is None:
-        if gmail_reader is None:
+        reader = gmail_reader() if callable(gmail_reader) else gmail_reader
+        if reader is None:
             raise AcquireError(
                 f"{album.title!r} requires an emailed download link but Gmail is not "
                 f"configured. Run with --gmail-auth first."
             )
-        url = gmail_reader.wait_for_link(album.item_id)
+        url = reader.wait_for_link(album.item_id)
 
     bc = Bandcamp("", require_auth=False)
     item = BandcampItem(
