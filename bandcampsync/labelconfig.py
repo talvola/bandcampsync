@@ -57,6 +57,10 @@ VALID_RULES = {
     "title_regex",
     "min_tracks",
     "max_tracks",
+    # Not a selection rule - it never decides whether an album is wanted. It tells the
+    # scan to keep checking already-downloaded releases for tracks added after the
+    # download, and report them. See STATUS_GROWN.
+    "watch_growth",
 }
 
 

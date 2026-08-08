@@ -224,6 +224,12 @@ post-punk/goth list gave 1 usable label, because commercial vinyl labels sell th
   In YAML, single-quote regexes containing backslashes: `'(?i)e\.b\.m\.'` (double quotes reject `\.`).
 - empty `{}` — every release is a comp, or comps are label-credited (distinct=1) and can't
   be told apart by rule.
+- `watch_growth: true` — **not a selection rule**; it never decides what is wanted. Re-checks
+  already-downloaded releases for tracks the label added later and reports them as `GROWN`
+  with a `--repair ITEM_ID` line. Never queues: repair re-fetches a whole archive, so it stays
+  manual. **It disables the cutoff for that label** (the cutoff skips exactly what needs
+  re-examining, and a release stops being newest long before it stops growing), so every scan
+  costs one request per release — PRF's 146 add ~4 min to a sweep. Small catalogues only.
 
 **Expect near-total dedup.** Erik's collection already holds most free comps — batches routinely
 report 37/39 or 68/79 already downloaded. Always `--report` first, and check the label directory on
