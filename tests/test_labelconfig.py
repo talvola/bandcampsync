@@ -48,6 +48,30 @@ def test_various_artists_matches_common_abbreviations():
         assert ok is True, spelling
 
 
+def test_various_artists_matches_non_english_credits():
+    """South America Avenue credited Progressive Pulse 012 to "Varios Artistas" while the
+    rest of the same series says "Various Artists"; the free one was silently skipped."""
+    for spelling in (
+        "Varios Artistas",
+        "varios artistas",
+        "Vários Artistas",
+        "Varios Artista",
+        "VV.AA.",
+        "VV. AA.",
+        "vvaa",
+        "AA.VV.",
+        "AAVV",
+    ):
+        ok, _ = matches(_album(artist=spelling), {"various_artists": True})
+        assert ok is True, spelling
+
+
+def test_various_artists_tolerates_trailing_punctuation():
+    for spelling in ("VARIOUS ARTISTS!", "Various Artists.", "V/A!"):
+        ok, _ = matches(_album(artist=spelling), {"various_artists": True})
+        assert ok is True, spelling
+
+
 def test_various_artists_does_not_match_a_bare_va():
     """ "VA" on its own is plausible as a real artist name, so it must not match."""
     ok, _ = matches(_album(artist="VA"), {"various_artists": True})
@@ -55,7 +79,16 @@ def test_various_artists_does_not_match_a_bare_va():
 
 
 def test_various_artists_still_rejects_near_misses():
-    for spelling in ("Various Artists Collective", "The Various Artists", "Various"):
+    for spelling in (
+        "Various Artists Collective",
+        "The Various Artists",
+        "Various",
+        # Widening for Varios Artistas must not start swallowing real band names that
+        # merely begin the same way.
+        "Varios Artistas Collective",
+        "Aavv Sound System",
+        "Vario",
+    ):
         ok, _ = matches(_album(artist=spelling), {"various_artists": True})
         assert ok is False, spelling
 
