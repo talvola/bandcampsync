@@ -83,6 +83,19 @@ uv run python bin/bandcampsync \
 - **Manually downloaded items:** The report auto-detects them by name/ID match; no manual tracking needed before syncing.
 - **Report runtime:** ~5 minutes (indexes all local media first). Always run report before full sync.
 
+**Albums that grow after release are invisible to the sync.** Running yearly collections
+(`Unwoman - 2026 Subscriber-Only Originals`) and monthly tribute comps (`PRF Monthly Tribute
+Series`, 145 dirs, **not** a bandcampfree label — it syncs as a purchase) gain tracks for weeks
+after they first appear. `sync_item` skips on `is_locally_downloaded*`, a yes/no on the
+directory existing, and the `item_id` does not change when tracks are added, so the first
+partial download is final. `--check-growth` (report-only) finds them: the collection payload
+already carries `num_streamable_tracks`, so comparing it against a local audio-file count costs
+no extra request. **It nominates candidates, it does not prove anything** — streamable ≠
+downloadable, so bonus/hidden tracks skew both directions. There is no repair path on this side
+yet; `bandcampfree --repair ITEM_ID` exists only for labels. Beware acting on a row flagged
+`no id file` or `AMBIGUOUS` — PRF's 145 dirs have zero `bandcamp_item_id.txt` files, so matching
+falls back to the lenient name path and a re-fetch could write a duplicate instead of topping up.
+
 **The report is lenient, the sync is strict — `Missing: N` UNDERCOUNTS what a sync will fetch.**
 In zip mode `report.classify_item` accepts three ways of being "downloaded" (id file/ignore
 file, then `get_expected_name_for_zip` against `item_names`, then `find_zip_item_by_title`),
@@ -163,6 +176,17 @@ from the search API's `item_url_root`, band_id, catalogue size, VA count, a newe
 sample, and the FULL comp-ish title list), show him counts + samples to catch wrong pages,
 then add with a per-label comment and scan with `--report -l "Name"`. Full operational
 detail (with the gotchas) is in the project memory `adding-new-labels-workflow.md`.
+**Two bands can answer to one name, and the search API may return the wrong one.** "Forward
+Music" resolved to Forward Music Group (Canadian indie, `forwardmusic.bandcamp.com`,
+band_id 1229744517) when the intended label was the progressive-house one at
+`forwardmusiclabel.bandcamp.com` (4192895757) — so four free comps were never fetched, and the
+per-label comment described whichever page had been found. **Repointing is safer than renaming**:
+the fix changed `url`/`band_id` in place and kept `name: Forward Music`, because the label dir
+already held 33 name-matched prog-house albums (no id files) that a rename would have orphaned
+into a full re-download. **Repointing inherits the old band's `newest_release_seen`** — here a
+future-dated 2026-08-28 that hid the entire new catalogue behind the cutoff, reporting
+`73 releases, 0 examined`. Always follow a repoint with `--full-scan -l "<label>"`.
+
 **Run probes SERIALLY** — two concurrent probes hit HTTP 429, which surfaces as
 `JSONDecodeError: Expecting value: line 1 column 1` (an HTML error page) and silently truncates
 a label's output. Recover with `deepcheck.py`, which retries with backoff. Do not pass `--url`
@@ -185,10 +209,15 @@ post-punk/goth list gave 1 usable label, because commercial vinyl labels sell th
   free title absent from the comp-ish list, use `{}` or `title_regex` instead (Sahel: 14 VA comps
   all paid, the one free item label-credited, so the rule returned nothing).
   Labels often credit comps several ways at once (`Various Artists`/`V/A`/`V.A.`/label) — match on title.
-  **The predicate is anchored and English-only**: it matches only `Various Artists`/`Various Artist`/
-  `V/A`/`V.A.` — NOT bare `Various`, `VA`, `VARIOUS ARTISTS!` (trailing punctuation), `VV.AA.`,
-  `Varios Artistas`, or `AAVV`. Read the probe's actual credit string; use `title_regex` when it
-  is any of those (hit on Paranoia Musique, pomogite, WORLD END COLLAPSE, Munster, Dorog).
+  **The predicate is anchored**: it matches `Various Artists`/`Various Artist`/`V/A`/`V.A.`,
+  the non-English `Varios/Vários Artistas`, `VV.AA.`/`AA.VV.`, and any of those with trailing
+  `!`/`.` — but NOT bare `Various` or `VA`, both plausible real band names. Read the probe's
+  actual credit string; use `title_regex` when it is one of those two (hit on Paranoia Musique,
+  pomogite, WORLD END COLLAPSE, Munster, Dorog).
+  **A label mixes spellings release to release**, so one entry in a series can vanish while the
+  rest match: South America Avenue credited the free `Progressive Pulse 012` to `Varios Artistas`
+  while 011/010/09 all say `Various Artists`. It was rejected at *prefilter*, so it never even
+  appeared in the report as filtered-by-rule — widened 2026-08-08.
 - `title_regex: "(?i)..."` — label-credited comp *series* (tracks show `distinct == 1`, so
   artist-count rules fail): samplers, tributes, "compilation". Also prefilters.
   **Anchor short generic alternatives** — a bare `dark` matched a solo EP "N3.0_Dark"; use `dark4`.
@@ -205,16 +234,25 @@ range.** Measured: 9 items/50 min and 8/53 min one evening, 12 items/18 min the 
 same machine. `[needs email]` is no longer the driver (Gmail resolves in <1 min now); GB and
 track count predict nothing (a 6-track album was 1.15 GB, a 20-track comp 0.46 GB).
 
-**Recurring sweep (set up 2026-07-28).** Scheduled task **"BandcampFree Weekly Sweep"** runs
-`N:\bandcampfree\weekly-report.ps1` daily at 03:15; it does a report-only scan of all labels
-only when ~7 days have passed (`reports\.last-success` stamp). Report-only by design — Erik
-approves before any download. Output lands in `N:\bandcampfree\reports\`, one summary line per
-run in `sweep.log`, and **a sweep that finds nothing writes no report file**. A daily trigger
-plus the due-check is the retry mechanism: when N: is unmounted the run logs a SKIP, exits 0
-and leaves the stamp alone, so it retries tomorrow. Guards: share reachable, sweep due, and no
-other bandcampfree process running (`scan_all()` rewrites `state.json`, so an overlapping
-manual download would corrupt the pending queue). Downloads stay manual:
-`--pending-only --max-gb N`.
+**Recurring sweep (set up 2026-07-28, made self-downloading 2026-08-07).** Scheduled task
+**"BandcampFree Weekly Sweep"** runs `N:\bandcampfree\weekly-report.ps1` daily at 03:15; it
+scans all labels only when ~7 days have passed (`reports\.last-success` stamp), then drains
+the queue it just filled with `--pending-only --max-gb 15`. Output lands in
+`N:\bandcampfree\reports\`, one summary line per run in `sweep.log`, and **a sweep that finds
+nothing writes no report file**. The dated report holds both what the scan wanted and a
+`=== download ===` section of what landed. A daily trigger plus the due-check is the retry
+mechanism: when N: is unmounted the run logs a SKIP, exits 0 and leaves the stamp alone, so it
+retries tomorrow. Guards: share reachable, sweep due, and no other bandcampfree process
+running (`scan_all()` rewrites `state.json`, so an overlapping manual download would corrupt
+the pending queue).
+**The stamp is written on a successful SCAN, not a successful download** — the scan is the
+rate-limited half, so a failed download must not trigger a 425-label re-scan every morning.
+Whatever did not land stays in `state.pending` and goes out with the next sweep. Anything past
+`--max-gb` does the same. `-NoDownload` restores the old approve-first behaviour; task
+`ExecutionTimeLimit` is `PT4H` to cover a 90-min scan plus a 120-min download.
+**This removed the human check on two documented failure modes** — match-rule false positives
+on crew albums, and same-title comp series that overwrite each other on extract. The report is
+now read after the fact rather than before, so scan `sweep.log` when adding volatile labels.
 
 **`--report` writes state.** `generate_free_report()` has no `state.save()`, but `scan_all()`
 inside it does — a report advances each label's `newest_release_seen` cutoff and fills

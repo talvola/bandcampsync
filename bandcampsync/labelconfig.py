@@ -27,9 +27,26 @@ MAX_PRICE = 0.0
 # Labels are inconsistent about this field. The Audio Atelier alone uses "Various Artists",
 # "Various Artist" and "Various artist" across its catalogue; UNKNOWN PLEASURES writes it in
 # caps; B O G U S COLLECTIVE abbreviates it to "V/A". Match all of those.
-# Deliberately does NOT match a bare "VA", which is plausible as a real artist name.
+#
+# Non-English forms count too, and a label mixes them with the English one release to the
+# next: South America Avenue credited "Progressive Pulse 012" to "Varios Artistas" while
+# 011, 010 and 09 all say "Various Artists", so the one free release in the series was
+# rejected at prefilter and never even fetched. Spanish/Portuguese "Varios Artistas" and
+# the Italian/Spanish "VV.AA." / "AA.VV." abbreviations are as unambiguous as "V/A"; there
+# is no plausible band by those names.
+#
+# Trailing punctuation is allowed ("VARIOUS ARTISTS!") since it changes nothing about the
+# credit. Deliberately still does NOT match a bare "VA" or a bare "Various", both of which
+# are plausible real artist names - use title_regex for a label that writes those.
 VARIOUS_ARTISTS_REGEX = re.compile(
-    r"^\s*(?:various\s+artists?|v\s*[./]\s*a\.?)\s*$", re.IGNORECASE
+    r"^\s*(?:"
+    r"various\s+artists?"
+    r"|v[aá]rios?\s+artistas?"
+    r"|v\s*[./]\s*a\.?"
+    r"|vv\s*\.?\s*aa\s*\.?"
+    r"|aa\s*\.?\s*vv\s*\.?"
+    r")\s*[!.]?\s*$",
+    re.IGNORECASE,
 )
 
 VALID_RULES = {
