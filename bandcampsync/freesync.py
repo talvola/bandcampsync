@@ -933,12 +933,25 @@ def pending_albums(config, state, api=None):
     return out
 
 
-def do_repair(config, state_path, item_id, client_secret=None, token_path=None):
+def do_repair(
+    config,
+    state_path,
+    item_id,
+    client_secret=None,
+    token_path=None,
+    temp_dir=None,
+    only_labels=None,
+):
     """Re-fetch one album and add only the files missing from its local directory.
 
     For albums a label extended after the original download. Bandcamp does not serve
     individual tracks of a compilation, so the whole archive has to come down even for a
     single missing file, but nothing already present is rewritten.
+
+    only_labels restricts the search for the owning label. Worth passing: an album that is
+    not pending has to be located by listing discographies until one contains it, which is
+    a request per label and runs in config order - ~11 minutes at the default delay for a
+    label near the end of a 426-label file, before the download even starts.
     """
     from .freedownload import repair_album
 
@@ -951,9 +964,17 @@ def do_repair(config, state_path, item_id, client_secret=None, token_path=None):
     specs = {spec.name: spec for spec in config.labels}
     api = BandcampAPI(delay=config.request_delay)
     label_name = state.pending.get(item_id)
+    if only_labels:
+        # An explicit label is authoritative: skip the search entirely when it names one.
+        named = [n for n in only_labels if n in specs]
+        if len(named) == 1:
+            label_name = named[0]
     if not label_name:
         # Not pending (it counts as downloaded), so find which label lists it.
-        for spec in config.labels:
+        candidates = config.labels
+        if only_labels:
+            candidates = [s for s in candidates if s.name in only_labels]
+        for spec in candidates:
             band_id = spec.band_id or state.label(spec.name).get("band_id")
             if not band_id:
                 continue
@@ -988,13 +1009,22 @@ def do_repair(config, state_path, item_id, client_secret=None, token_path=None):
         f"({existing} local files, {album.num_tracks} remote tracks)"
     )
 
-    gmail_reader = None
-    if album.require_email:
-        from .gmail import GmailReader, load_credentials
+    # Built lazily and never gated on album.require_email: whether a link comes by email is
+    # decided by /email_download when the request is made, and the flag disagrees - every
+    # PRF release reports require_email False and still answers with no direct URL. Same
+    # lazy factory do_free_sync uses, so an OAuth prompt only happens if a link is needed.
+    _gmail = {}
 
-        gmail_reader = GmailReader(load_credentials(client_secret, token_path))
+    def get_gmail_reader():
+        if "reader" not in _gmail:
+            from .gmail import GmailReader, load_credentials
 
-    added = repair_album(album, spec, config, local_path, gmail_reader)
+            _gmail["reader"] = GmailReader(load_credentials(client_secret, token_path))
+        return _gmail["reader"]
+
+    added = repair_album(
+        album, spec, config, local_path, get_gmail_reader, temp_dir=temp_dir
+    )
     if added:
         log.info(f"Added {len(added)} file(s):")
         for name in added:

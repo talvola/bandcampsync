@@ -114,12 +114,21 @@ if __name__ == '__main__':
 
     if args.repair:
         from bandcampsync.freesync import do_repair
+        # A repair downloads the album's whole archive to extract the few files that are
+        # missing, so it needs --temp-dir every bit as much as a normal download does.
+        repair_temp = None
+        if args.temp_dir:
+            repair_temp = Path(args.temp_dir).resolve()
+            if not repair_temp.is_dir():
+                raise ValueError(f'Temporary directory does not exist: {repair_temp}')
         do_repair(
             config,
             state_path,
             args.repair,
             client_secret=args.client_secret,
             token_path=args.token,
+            temp_dir=repair_temp,
+            only_labels=only_labels,
         )
         log.info('Repair complete')
         sys.exit(0)
