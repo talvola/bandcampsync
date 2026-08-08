@@ -110,6 +110,14 @@ class LocalMedia:
         self.ignores = ignores
         self.media = {}
         self.item_names = set()
+        # Directory name -> path, for callers that matched by name and then need the
+        # directory itself (the growth audit counts files in it). item_names is a set of
+        # bare names and cannot answer that. A name appearing twice - the near-duplicate
+        # case, e.g. a root-level copy and a label-subdirectory copy - is recorded in
+        # ambiguous_names and left pointing at whichever was indexed first, because no
+        # rule here can say which one is the real album.
+        self.item_paths = {}
+        self.ambiguous_names = set()
         self.sync_ignore_file = sync_ignore_file
         self.dir_format = dir_format
         log.info(f"Local media directory: {self.media_dir}")
@@ -155,6 +163,9 @@ class LocalMedia:
                                         self.ignores.add(item)
                                 self.media[item_id] = child2
                                 self.item_names.add((child2.parent.name, child2.name))
+                                self._record_path(
+                                    (child2.parent.name, child2.name), child2
+                                )
                                 log.info(
                                     f"Detected locally downloaded media: {item_id} = {child2}"
                                 )
@@ -174,10 +185,12 @@ class LocalMedia:
                     log.info(f"Detected locally downloaded media: {item_id} = {child1}")
             # Always add to item_names for name-based matching
             self.item_names.add(child1.name)
+            self._record_path(child1.name, child1)
             # Check depth 2: media_dir/Label/Artist - Album/
             for child2 in child1.iterdir():
                 if child2.is_dir():
                     self.item_names.add(child2.name)
+                    self._record_path(child2.name, child2)
                     id_file2 = child2 / self.ITEM_INDEX_FILENAME
                     if id_file2.is_file():
                         item_id = self.read_item_id(id_file2)
@@ -187,6 +200,13 @@ class LocalMedia:
                                 f"Detected locally downloaded media: {item_id} = {child2}"
                             )
         return True
+
+    def _record_path(self, key, path):
+        """Remember where a name was seen, noting collisions rather than overwriting."""
+        if key in self.item_paths:
+            self.ambiguous_names.add(key)
+            return
+        self.item_paths[key] = path
 
     def read_item_id(self, filepath):
         with open(filepath, "rt") as f:

@@ -9,7 +9,15 @@ import pytest
 from bandcampsync.bandcamp import BandcampItem
 from bandcampsync.ignores import Ignores
 from bandcampsync.media import LocalMedia
-from bandcampsync.report import classify_item, generate_report, print_report, write_csv
+from bandcampsync.report import (
+    check_growth,
+    classify_item,
+    generate_report,
+    print_growth_report,
+    print_report,
+    remote_track_count,
+    write_csv,
+)
 
 
 def _make_item(
@@ -333,3 +341,187 @@ def test_generate_report_with_csv(tmp_path, capsys):
         rows = list(csv.reader(f))
     assert len(rows) == 2  # header + 1 item
     assert rows[1][1] == "Artist"
+
+
+# --- growth audit ---
+
+
+def _make_growth_item(item_id, tracks, band_name="Artist", item_title="Album"):
+    item = _make_item(item_id, band_name, item_title)
+    item._data["num_streamable_tracks"] = tracks
+    return item
+
+
+def _album_dir(root, name, flacs, item_id=None, extras=()):
+    d = root / name
+    d.mkdir(parents=True)
+    for i in range(flacs):
+        (d / f"{i + 1:02d} Track.flac").write_text("x")
+    for extra in extras:
+        (d / extra).write_text("x")
+    if item_id is not None:
+        (d / "bandcamp_item_id.txt").write_text(str(item_id))
+    return d
+
+
+def _zip_media(tmp_path, ignores):
+    return LocalMedia(
+        media_dir=tmp_path,
+        ignores=ignores,
+        skip_item_index=False,
+        sync_ignore_file=False,
+        dir_format="zip",
+    )
+
+
+def test_growth_detects_album_that_gained_tracks(tmp_path, ignores):
+    _album_dir(tmp_path, "Artist - Album", flacs=3, item_id=1, extras=["cover.jpg"])
+    lm = _zip_media(tmp_path, ignores)
+    item = _make_growth_item(1, tracks=8)
+
+    grown, unresolved = check_growth([(item, "downloaded", None)], lm, "zip")
+
+    assert unresolved == 0
+    assert len(grown) == 1
+    assert (grown[0]["local"], grown[0]["remote"], grown[0]["missing"]) == (3, 8, 5)
+    assert grown[0]["matched_by"] == "id"
+    assert grown[0]["has_id_file"] is True
+
+
+def test_growth_ignores_complete_album(tmp_path, ignores):
+    _album_dir(tmp_path, "Artist - Album", flacs=8, item_id=1)
+    lm = _zip_media(tmp_path, ignores)
+    item = _make_growth_item(1, tracks=8)
+
+    grown, _ = check_growth([(item, "downloaded", None)], lm, "zip")
+
+    assert grown == []
+
+
+def test_growth_ignores_album_with_more_local_than_remote(tmp_path, ignores):
+    """Bonus tracks in a download that are not streamable; not a shortfall."""
+    _album_dir(tmp_path, "Artist - Album", flacs=12, item_id=1)
+    lm = _zip_media(tmp_path, ignores)
+    item = _make_growth_item(1, tracks=10)
+
+    grown, _ = check_growth([(item, "downloaded", None)], lm, "zip")
+
+    assert grown == []
+
+
+def test_growth_counts_multi_disc_subdirectories(tmp_path, ignores):
+    d = _album_dir(tmp_path, "Artist - Album", flacs=0, item_id=1)
+    for disc in ("Disc 1", "Disc 2"):
+        sub = d / disc
+        sub.mkdir()
+        for i in range(5):
+            (sub / f"{i + 1:02d} Track.flac").write_text("x")
+    lm = _zip_media(tmp_path, ignores)
+    item = _make_growth_item(1, tracks=10)
+
+    grown, _ = check_growth([(item, "downloaded", None)], lm, "zip")
+
+    assert grown == []
+
+
+def test_growth_flags_name_match_without_id_file(tmp_path, ignores):
+    """PRF-style directories carry no id file, so a repair could hit the wrong one."""
+    _album_dir(tmp_path, "Artist - Album", flacs=2)
+    lm = _zip_media(tmp_path, ignores)
+    item = _make_growth_item(1, tracks=6)
+
+    grown, _ = check_growth([(item, "downloaded", None)], lm, "zip")
+
+    assert len(grown) == 1
+    assert grown[0]["matched_by"] == "name"
+    assert grown[0]["has_id_file"] is False
+
+
+def test_growth_flags_duplicate_directory_names(tmp_path, ignores):
+    """A root-level copy and a label-subdirectory copy of the same name."""
+    _album_dir(tmp_path, "Artist - Album", flacs=2)
+    _album_dir(tmp_path / "Label", "Artist - Album", flacs=2)
+    lm = _zip_media(tmp_path, ignores)
+    item = _make_growth_item(1, tracks=6)
+
+    grown, _ = check_growth([(item, "downloaded", None)], lm, "zip")
+
+    assert len(grown) == 1
+    assert grown[0]["ambiguous"] is True
+
+
+def test_growth_skips_items_without_track_count(tmp_path, ignores):
+    _album_dir(tmp_path, "Artist - Album", flacs=1, item_id=1)
+    lm = _zip_media(tmp_path, ignores)
+    item = _make_item(1)  # no num_streamable_tracks at all
+
+    grown, unresolved = check_growth([(item, "downloaded", None)], lm, "zip")
+
+    assert grown == []
+    assert unresolved == 0
+
+
+def test_growth_skips_non_downloaded_statuses(tmp_path, ignores):
+    lm = _zip_media(tmp_path, ignores)
+    item = _make_growth_item(1, tracks=8)
+
+    grown, unresolved = check_growth(
+        [(item, "missing", None), (item, "ignored", None), (item, "preorder", None)],
+        lm,
+        "zip",
+    )
+
+    assert grown == []
+    assert unresolved == 0
+
+
+def test_growth_counts_unresolved_items(tmp_path, ignores):
+    lm = _zip_media(tmp_path, ignores)
+    item = _make_growth_item(1, tracks=8, band_name="Gone", item_title="Missing")
+
+    grown, unresolved = check_growth([(item, "downloaded", None)], lm, "zip")
+
+    assert grown == []
+    assert unresolved == 1
+
+
+def test_growth_sorts_most_underfilled_first(tmp_path, ignores):
+    _album_dir(tmp_path, "Artist - Small", flacs=4, item_id=1)
+    _album_dir(tmp_path, "Artist - Big", flacs=1, item_id=2)
+    lm = _zip_media(tmp_path, ignores)
+    results = [
+        (_make_growth_item(1, tracks=6, item_title="Small"), "downloaded", None),
+        (_make_growth_item(2, tracks=20, item_title="Big"), "downloaded", None),
+    ]
+
+    grown, _ = check_growth(results, lm, "zip")
+
+    assert [r["missing"] for r in grown] == [19, 2]
+
+
+def test_growth_artist_album_format(tmp_path, ignores):
+    _album_dir(tmp_path / "Artist", "Album", flacs=3, item_id=1)
+    lm = LocalMedia(
+        media_dir=tmp_path,
+        ignores=ignores,
+        skip_item_index=False,
+        sync_ignore_file=False,
+        dir_format="artist-album",
+    )
+    item = _make_growth_item(1, tracks=9)
+
+    grown, _ = check_growth([(item, "downloaded", None)], lm, "artist-album")
+
+    assert len(grown) == 1
+    assert grown[0]["missing"] == 6
+
+
+def test_remote_track_count_handles_junk():
+    assert remote_track_count(_make_growth_item(1, tracks=None)) is None
+    assert remote_track_count(_make_growth_item(1, tracks="")) is None
+    assert remote_track_count(_make_growth_item(1, tracks="7")) == 7
+
+
+def test_print_growth_report_no_candidates(capsys):
+    print_growth_report([], 0)
+    assert "No albums hold fewer audio files" in capsys.readouterr().out

@@ -47,6 +47,10 @@ if __name__ == '__main__':
         help='Run in report mode: compare purchases to local files without downloading')
     parser.add_argument('--report-csv', default='',
         help='Write a CSV report to the given path (implies --report)')
+    parser.add_argument('--check-growth', action='store_true',
+        help='Also list downloaded albums holding fewer audio files than bandcamp '
+             'reports tracks, i.e. releases a label added to after they were synced '
+             '(implies --report). Reports only; downloads nothing')
     args = parser.parse_args()
     if args.version:
         print(f'BandcampSync version: {version}', file=sys.stdout)
@@ -92,7 +96,7 @@ if __name__ == '__main__':
     with open(cookies_path, 'rt') as f:
         cookies = f.read().strip()
     log.info(f'Loaded cookies from "{cookies_path}"')
-    if args.report or args.report_csv:
+    if args.report or args.report_csv or args.check_growth:
         csv_path = Path(args.report_csv).resolve() if args.report_csv else None
         generate_report(
             cookies,
@@ -102,6 +106,7 @@ if __name__ == '__main__':
             skip_item_index=skip_item_index,
             dir_format=dir_format,
             csv_path=csv_path,
+            growth=args.check_growth,
         )
         log.info('Report complete')
         sys.exit(0)
