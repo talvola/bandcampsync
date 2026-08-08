@@ -299,8 +299,16 @@ class LocalMedia:
         surrounded it behind, so "RECORDS - Vol. VII" reduced to "records  vol vii" with
         a double space and failed to match "RECORDS Vol. VII" - a real case that caused
         an album to be downloaded a second time.
+
+        Composed to NFC first, because the same title reaches this function in both forms:
+        "Hüsker Dü" arrived decomposed ("u" + U+0308) from one download and composed from
+        another, and a combining mark is not alphanumeric, so the filter silently dropped
+        it - reducing one to "husker du" and the other to "hüsker dü". They then failed to
+        match each other and the album would have been fetched a second time.
         """
-        cleaned = "".join(c.lower() for c in s if c.isalnum() or c.isspace())
+        cleaned = "".join(
+            c.lower() for c in normalize("NFC", s) if c.isalnum() or c.isspace()
+        )
         return " ".join(cleaned.split())
 
     def find_zip_item_by_title(self, item):

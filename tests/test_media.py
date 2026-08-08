@@ -379,7 +379,7 @@ def test_clean_path_component_strips_windows_illegal_characters():
 
     assert clean_path_component("12|21") == "1221"
     assert clean_path_component("<i> hate </i> markup") == "i hate i markup"
-    for char in '|<>':
+    for char in "|<>":
         assert char not in clean_path_component(f"a{char}b")
 
 
@@ -401,3 +401,16 @@ def test_clean_label_dir_name_is_narrower_than_clean_path_component():
     name = "Don't Panic Records & Distro"
     assert clean_path_component(name) == "Dont Panic Records & Distro"
     assert clean_label_dir_name(name) == name
+
+
+def test_normalize_for_match_is_unicode_form_insensitive():
+    """The same title reaches this in both forms: PRF's "January 2016: Hüsker Dü" was on
+    disk composed from one download and decomposed from another, and a combining mark is
+    not alphanumeric, so the filter dropped it and the two stopped matching."""
+    composed = "January 2016- H\u00fcsker D\u00fc"
+    decomposed = "January 2016- Hu\u0308sker Du\u0308"
+
+    assert composed != decomposed
+    key = LocalMedia._normalize_for_match
+    assert key(composed) == key(decomposed)
+    assert key(decomposed) == "january 2016 hüsker dü"
