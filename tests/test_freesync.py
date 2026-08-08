@@ -1123,3 +1123,38 @@ def test_label_dir_keeps_apostrophes_so_existing_directories_still_match(tmp_pat
 
     index = LabelIndex(tmp_path, "Don't Panic Records & Distro")
     assert index.find(_album(item_id=2, title="DeKalb Brawl City"))[0] is not None
+
+
+# --- watch_growth ---
+
+
+def test_count_audio_files_counts_only_audio(tmp_path):
+    from bandcampsync.freesync import count_audio_files
+
+    d = tmp_path / "album"
+    d.mkdir()
+    for n in ("01.flac", "02.flac", "03.mp3"):
+        (d / n).write_text("x")
+    for n in ("cover.jpg", "notes.txt", "bandcamp_item_id.txt"):
+        (d / n).write_text("x")
+
+    assert count_audio_files(d) == 3
+
+
+def test_count_audio_files_descends_one_level(tmp_path):
+    from bandcampsync.freesync import count_audio_files
+
+    d = tmp_path / "album"
+    (d / "Disc 1").mkdir(parents=True)
+    (d / "Disc 2").mkdir()
+    for disc in ("Disc 1", "Disc 2"):
+        for i in range(4):
+            (d / disc / f"{i}.flac").write_text("x")
+
+    assert count_audio_files(d) == 8
+
+
+def test_count_audio_files_missing_directory_returns_none(tmp_path):
+    from bandcampsync.freesync import count_audio_files
+
+    assert count_audio_files(tmp_path / "nope") is None

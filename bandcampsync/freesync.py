@@ -50,14 +50,60 @@ STATUS_ERROR = "error"
 # Title matches more than one local directory, so neither downloading nor skipping is
 # safe. Resolved by writing bandcamp_item_id.txt files.
 STATUS_AMBIGUOUS = "ambiguous"
+# Downloaded, but the local directory holds fewer audio files than the label now lists
+# tracks: a release that grew after it was fetched. Only ever reported, never queued -
+# topping one up is `--repair ITEM_ID`, which is a deliberate manual step.
+STATUS_GROWN = "grown"
 ALL_STATUSES = (
     STATUS_WANTED,
+    STATUS_GROWN,
     STATUS_DOWNLOADED,
     STATUS_AMBIGUOUS,
     STATUS_NOT_FREE,
     STATUS_FILTERED,
     STATUS_ERROR,
 )
+
+# Extensions counted as tracks when checking a watch_growth label for growth.
+AUDIO_EXTENSIONS = {
+    ".flac",
+    ".mp3",
+    ".m4a",
+    ".aac",
+    ".ogg",
+    ".oga",
+    ".opus",
+    ".wav",
+    ".aif",
+    ".aiff",
+    ".alac",
+    ".wma",
+}
+
+
+def count_audio_files(path):
+    """Count audio files in an album directory, descending one level for multi-disc sets.
+
+    Returns None if the directory cannot be read, which callers treat as "do not guess".
+    """
+    try:
+        count = 0
+        for child in Path(path).iterdir():
+            if child.is_file():
+                if child.suffix.lower() in AUDIO_EXTENSIONS:
+                    count += 1
+            elif child.is_dir():
+                try:
+                    count += sum(
+                        1
+                        for f in child.iterdir()
+                        if f.is_file() and f.suffix.lower() in AUDIO_EXTENSIONS
+                    )
+                except OSError:
+                    continue
+        return count
+    except OSError:
+        return None
 
 
 class FreeState:
@@ -395,6 +441,13 @@ def resolve_cutoff(spec, state, index, full_scan):
         return None, "full scan requested"
     if not state.has_scanned(spec.name):
         return None, "first scan of this label, examining the full back catalogue"
+    if spec.match.get("watch_growth"):
+        # A cutoff and watch_growth are contradictory: the cutoff exists to skip releases
+        # already examined, which is exactly the set watch_growth needs to re-examine. A
+        # release also stops being the newest long before it stops growing - PRF's August
+        # comp is still filling up when September's is posted, and September moves the
+        # cutoff past it - so growth would go unnoticed precisely when it matters.
+        return None, "watch_growth: re-examining the full catalogue every scan"
     if spec.since:
         return spec.since, f"configured since: {spec.since:%Y-%m-%d}"
     seen = state.label(spec.name).get("newest_release_seen")
@@ -504,6 +557,21 @@ def scan_label(api, spec, state, media_dir, full_scan=False):
         local, ambiguous = index.find(album)
         if local:
             state.pending.pop(album.item_id, None)
+            # A watch_growth label keeps adding tracks to a release after publishing it -
+            # PRF posts a month's tribute comp with two tracks and finishes it six weeks
+            # later. Nothing else would ever notice: the release date does not move, so
+            # the cutoff hides it, and the directory exists, so this branch calls it done.
+            if spec.match.get("watch_growth") and album.num_tracks:
+                have = count_audio_files(index.dir / local)
+                if have is not None and have < album.num_tracks:
+                    results.append(
+                        (
+                            album,
+                            STATUS_GROWN,
+                            f"{have} local file(s), {album.num_tracks} tracks now listed",
+                        )
+                    )
+                    continue
             results.append((album, STATUS_DOWNLOADED, local))
             continue
         if ambiguous:
@@ -611,6 +679,14 @@ def print_report(all_results, output=None, meta=None):
                 _safe_print(f"  AMBIGUOUS {album.artist} - {album.title}", output)
                 _safe_print(f"          {album.url}", output)
                 _safe_print(f"          {detail}", output)
+                continue
+            if status == STATUS_GROWN:
+                _safe_print(f"  GROWN {album.artist} - {album.title}", output)
+                _safe_print(f"          {detail}", output)
+                _safe_print(
+                    f"          top up with: --repair {album.item_id}",
+                    output,
+                )
                 continue
             if status != STATUS_WANTED:
                 continue
