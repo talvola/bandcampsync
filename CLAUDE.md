@@ -247,8 +247,12 @@ running (`scan_all()` rewrites `state.json`, so an overlapping manual download w
 the pending queue).
 **The stamp is written on a successful SCAN, not a successful download** — the scan is the
 rate-limited half, so a failed download must not trigger a 425-label re-scan every morning.
-Whatever did not land stays in `state.pending` and goes out with the next sweep. Anything past
-`--max-gb` does the same. `-NoDownload` restores the old approve-first behaviour; task
+Whatever did not land stays in `state.pending`. **A not-due run still drains a non-empty
+queue** (guard 3, "not due ... but N queued - draining"): draining issues no per-label
+requests, so an item queued on Monday goes out that night instead of waiting up to a week for
+the next scan. Its log goes to `reports\drain-<stamp>.txt` and it writes no stamp — a drain is
+not a scan. The concurrency guard therefore runs *before* the due check, since both paths
+download. Anything past `--max-gb` waits for the next run the same way. `-NoDownload` restores the old approve-first behaviour; task
 `ExecutionTimeLimit` is `PT4H` to cover a 90-min scan plus a 120-min download.
 **This removed the human check on two documented failure modes** — match-rule false positives
 on crew albums, and same-title comp series that overwrite each other on extract. The report is
