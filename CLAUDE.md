@@ -109,8 +109,11 @@ Noise` vs a new root-level `… Bring The Noise` (case). Self-limiting: the fetc
 to the ignore file, so each such item duplicates at most once.
 
 **Scheduled: task "BandcampSync Weekly Collection"** runs `N:\bandcampsync\weekly-sync.ps1`
-daily at 04:45 — after the 03:15 free sweep, and it skips if any bandcampsync *or*
-bandcampfree process is running (they share the media root and the NAS link). Same
+daily at 05:30 — **before** the 06:00 free sweep, and it skips if any bandcampsync *or*
+bandcampfree process is running (they share the media root and the NAS link). Both were moved
+later on 2026-08-08 to clear Plex's ~02:00 database-backup window, and the order was flipped
+at the same time: the sweep can run 3.5 h, and while it does, this job would skip and lose a
+whole day. Short job first. Same
 daily-trigger/6.5-day-due/`logs\.last-success` shape as the free sweep, so an unmounted N:
 retries tomorrow. Unlike the free sweep it **downloads** (items are already paid for; no
 approval step). Quiet weeks write only a one-line `logs\sync.log` entry; a dated file in
@@ -241,7 +244,7 @@ same machine. `[needs email]` is no longer the driver (Gmail resolves in <1 min 
 track count predict nothing (a 6-track album was 1.15 GB, a 20-track comp 0.46 GB).
 
 **Recurring sweep (set up 2026-07-28, made self-downloading 2026-08-07).** Scheduled task
-**"BandcampFree Weekly Sweep"** runs `N:\bandcampfree\weekly-report.ps1` daily at 03:15; it
+**"BandcampFree Weekly Sweep"** runs `N:\bandcampfree\weekly-report.ps1` daily at 06:00; it
 scans all labels only when ~7 days have passed (`reports\.last-success` stamp), then drains
 the queue it just filled with `--pending-only --max-gb 15`. Output lands in
 `N:\bandcampfree\reports\`, one summary line per run in `sweep.log`, and **a sweep that finds
