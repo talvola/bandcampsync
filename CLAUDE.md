@@ -30,6 +30,15 @@ uv run python -m pytest tests/test_syncer.py::test_skips_preorder -v
 
 Package manager is `uv`. Dev dependencies (pytest, pytest-mock, ruff) are in `pyproject.toml` under `[dependency-groups] dev`.
 
+**Ad-hoc scripts that print album names need `PYTHONUTF8=1`** — the Windows console is cp1252 and
+titles are full of unicode (`Hüsker Dü`, `Affaire Française`), so a bare `uv run python -c ...`
+dies with `UnicodeEncodeError: 'charmap' codec`. `weekly-report.ps1` already sets it.
+**Lint has a pre-existing baseline (~71 errors repo-wide, 11 in the commonly-touched files)** —
+`git stash && uvx ruff check <files>` before blaming your change. Format only the files you
+changed: `uvx ruff format` on the whole tree reformats unrelated ones and pollutes the diff.
+**Never `find` the whole media tree** — it times out over SMB. Use `Get-ChildItem -Directory
+-Filter` at depth 1-2, or build a dict from one `iterdir()` pass.
+
 ## Architecture
 
 **Entry points:**
@@ -82,6 +91,18 @@ uv run python bin/bandcampsync \
 - **Concurrency:** 3
 - **Manually downloaded items:** The report auto-detects them by name/ID match; no manual tracking needed before syncing.
 - **Report runtime:** ~5 minutes (indexes all local media first). Always run report before full sync.
+
+**To refetch an album — the collection side has no `--repair`:** move its directory to
+**`T:\_superseded\<date>\`**, then run the normal sync. **Quarantine outside the media share, not
+under `N:`** — Plex scans the Music share, so an old copy parked at `N:\_superseded\` gets indexed
+and every replaced album shows up twice in the library. **Deleting only `bandcamp_item_id.txt`
+does not work**: in zip mode the directory *name* alone satisfies `is_locally_downloaded_by_id`.
+Move rather than delete — it is the only undo. Expect relocation: 9 of 23 refetched albums came
+back under a *different* parent (root ↔ label subdirectory), because `get_path_for_zip_purchase`
+decides from the zip filename once the old directory is gone.
+**With `-I`, completed downloads are recorded in the ignore file, not per-directory id files**,
+as `<id>  # Artist / Title`. Grep `"^<id> "` — an anchored `"^<id>$"` matches nothing and reads
+as "never tracked" when it is.
 
 **Albums that grow after release are invisible to the sync.** Running yearly collections
 (`Unwoman - 2026 Subscriber-Only Originals`) and monthly tribute comps (`PRF Monthly Tribute
@@ -170,6 +191,8 @@ uv run python bin/bandcampfree --gmail-auth                          # one-time
 - **Rate limiting is real** — a full scan of a 674-album label hits HTTP 429. `prefilter()`
   rejects albums using the artist/title from the single `band_details` call before spending
   a per-album request (674 → 70 for Future Avenue). Keep `request_delay` at 1s or higher.
+- **`FreeState.items` and `.pending` are keyed by `int`**, not str — `state.items.get("123")`
+  silently returns None, and a batch script reports every album as missing.
 - **Scan cutoff is the newest release date already examined**, stored in state — never file
   mtime, which updates on download and would hide older un-fetched releases. Wanted-but-not-
   downloaded albums are kept in `state.pending` and reconsidered regardless of cutoff.
