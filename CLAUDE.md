@@ -90,8 +90,14 @@ after they first appear. `sync_item` skips on `is_locally_downloaded*`, a yes/no
 directory existing, and the `item_id` does not change when tracks are added, so the first
 partial download is final. `--check-growth` (report-only) finds them: the collection payload
 already carries `num_streamable_tracks`, so comparing it against a local audio-file count costs
-no extra request. **It nominates candidates, it does not prove anything** — streamable ≠
-downloadable, so bonus/hidden tracks skew both directions. There is no repair path on this side
+no extra request. **In the one full run to date it was right on all 28 candidates** (verified
+2026-08-08 against actual downloads), so treat a flagged album as real until proven otherwise.
+**Do NOT "verify" a candidate against the public mobile API** (`tralbum_details`,
+`num_downloadable_tracks`): that undercounts, because bonus tracks, demos and `-Single Version-`
+extras ship in the download but are not publicly streamable, and a withdrawn album reports 0
+while the purchase still downloads fine. Doing so wrongly excluded 5 of 28 — every one of which
+turned out to need refetching. The only authoritative check is the **collection download link**
+(`get_download_file_url`), the same path the sync itself uses. There is no repair path on this side
 yet; `bandcampfree --repair ITEM_ID` exists only for labels. Beware acting on a row flagged
 `no id file` or `AMBIGUOUS` — PRF's 145 dirs have zero `bandcamp_item_id.txt` files, so matching
 falls back to the lenient name path and a re-fetch could write a duplicate instead of topping up.
