@@ -228,6 +228,30 @@ def _parse_release_date(value):
     return None
 
 
+def _digital_price(details):
+    """The price of the DIGITAL download, which is not always the `price` field.
+
+    tralbum_details reports the album's minimum_price as `price`, and that describes the
+    cheapest way to get the release, physical included. When download_pref == 1 (which
+    the API exposes as free_download) the digital download is free regardless of what
+    that number says: My Proud Mountain's "15 Songs 15 Years" reports price=9.0 EUR
+    because a sold-out physical package set a EUR 9 minimum, while its album page carries
+    download_pref=1 and freeDownloadPage=true and the download costs nothing.
+
+    Normalising here rather than in is_free is deliberate: freesync also enforces
+    `album.price > MAX_PRICE` as a hard ceiling against ever paying for anything, and
+    that ceiling must keep comparing against the real digital price.
+
+    The converse trap still stands and is why free_download can only ever ADD a way of
+    being free, never be required: it is False for ordinary name-your-price-at-0 albums,
+    which are the common case.
+    """
+    price = float(details.get("price") or 0.0)
+    if details.get("free_download") and details.get("has_digital_download", True):
+        return 0.0
+    return price
+
+
 def album_from_details(details, label_name=""):
     """Build a FreeAlbum from a tralbum_details API response."""
     tracks = details.get("tracks") or []
@@ -236,7 +260,7 @@ def album_from_details(details, label_name=""):
         title=details.get("title") or "",
         artist=details.get("tralbum_artist") or "",
         url=details.get("bandcamp_url") or "",
-        price=float(details.get("price") or 0.0),
+        price=_digital_price(details),
         is_set_price=bool(details.get("is_set_price")),
         require_email=bool(details.get("require_email")),
         free_download=bool(details.get("free_download")),
