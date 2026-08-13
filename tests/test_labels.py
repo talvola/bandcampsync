@@ -120,3 +120,50 @@ def test_album_from_details_tolerates_missing_tracks():
     assert album.num_tracks == 0
     assert album.track_artists == []
     assert album.is_free is True
+
+
+def test_free_instant_download_with_a_nonzero_minimum_price():
+    """download_pref == 1 makes the DIGITAL download free whatever `price` says.
+
+    tralbum_details reports minimum_price as `price`, and a sold-out physical package
+    can set that above zero while the download itself costs nothing. Real payload:
+    My Proud Mountain's "15 Songs 15 Years" reports price=9.0 EUR, free_download=true,
+    is_purchasable=false, merch_sold_out=true, and its album page carries
+    download_pref=1 / freeDownloadPage=true.
+
+    Before this was handled the album was classified paid and never queued, and
+    freesync's `album.price > MAX_PRICE` ceiling would have rejected it a second time.
+    """
+    album = album_from_details(
+        {
+            "id": 3049177532,
+            "title": "15 Songs 15 Years",
+            "tralbum_artist": "MPM RADIO",
+            "price": 9.0,
+            "currency": "EUR",
+            "is_set_price": False,
+            "is_purchasable": False,
+            "free_download": True,
+            "has_digital_download": True,
+            "num_downloadable_tracks": 15,
+        }
+    )
+    assert album.price == 0.0
+    assert album.free_download is True
+    assert album.is_free is True
+
+
+def test_free_download_flag_cannot_rescue_an_undownloadable_item():
+    """The has_digital_download guard still wins: nothing to download is not free."""
+    album = album_from_details(
+        {
+            "id": 1,
+            "title": "Vinyl only",
+            "price": 20.0,
+            "is_set_price": False,
+            "free_download": True,
+            "has_digital_download": False,
+        }
+    )
+    assert album.price == 20.0
+    assert album.is_free is False
