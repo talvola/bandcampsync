@@ -82,8 +82,22 @@ class FreeAlbum:
         are not separately purchasable at all - individual tracks of a compilation, for
         instance. Those would otherwise look free (None becomes 0.0) and every download
         attempt would fail.
+
+        num_tracks matters for the same reason and is not covered by it: vinyl-only and
+        placeholder listings can report has_digital_download true with nothing actually
+        downloadable. Those used to be reachable only at price=None, but _digital_price
+        now zeroes the price of any free_download item, so a CD or cassette listing with
+        a real price and no downloadable tracks became free-looking too. Three reached
+        the queue in the 2026-08-14 audit (a Triple Agent CD, a Musica Tenebris cassette,
+        an OMOIDE listing) and every one would have failed with "Release offers no
+        downloads".
         """
-        return self.price == 0.0 and not self.is_set_price and self.has_digital_download
+        return (
+            self.price == 0.0
+            and not self.is_set_price
+            and self.has_digital_download
+            and self.num_tracks > 0
+        )
 
     @property
     def distinct_track_artists(self):
