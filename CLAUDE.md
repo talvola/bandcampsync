@@ -179,9 +179,21 @@ uv run python bin/bandcampfree --gmail-auth                          # one-time
   `tralbum_details`). No HTML scraping — it returns prices, per-track artists and release
   dates as clean JSON. Scraping `/music` requires unioning static `<li>` elements with a
   disjoint `data-client-items` blob, and `?page=2` is a no-op.
-- **Free detection:** `price == 0.0 and not is_set_price`. Do **not** gate on
-  `free_download` — that maps to `download_pref == 1` and is False for ordinary
-  name-your-price-at-$0 albums.
+- **Free detection:** `price == 0.0 and not is_set_price and has_digital_download and
+  num_tracks > 0`. Do **not** *require* `free_download` — that maps to `download_pref == 1`
+  and is False for ordinary name-your-price-at-$0 albums, the common case.
+  **But a NONZERO price can still be free.** `price` is really `minimum_price` and covers
+  physical copies, so a sold-out record can put €9 on a release whose download is free
+  (`download_pref == 1` / `freeDownloadPage: true`). `labels._digital_price` zeroes the price
+  of any `free_download` item for exactly this; normalised there, not in `is_free`, so
+  freesync's `price > MAX_PRICE` ceiling keeps comparing against the real digital price.
+  Found 2026-08-13 on My Proud Mountain's `15 Songs 15 Years` (Erik saw it free in the UI
+  after the tool called it paid); re-pricing the corpus turned up **142** such albums.
+  The `num_tracks > 0` half retires the long-standing junk class — vinyl/CD/cassette
+  listings with `has_digital_download: true` and nothing to download, which used to reach
+  the queue and fail with "Release offers no downloads".
+  **When scoring a catalogue by hand, always classify with `album_from_details(...).is_free`,
+  never a raw price comparison** — `probe_labels.py` and `deepcheck.py` both get this wrong.
 - **`/email_download` requires `country` and `postcode`.** Omitting them returns
   `"Sorry, this item is no longer available for free."`, which means bad location data, not
   quota exhaustion. No cookies or reCAPTCHA token are needed.
@@ -201,7 +213,15 @@ uv run python bin/bandcampfree --gmail-auth                          # one-time
   `clean_path_component` (which `LocalMedia` shares — do not widen that one). Diverging made
   a label's whole catalogue re-download. Keep every label `name:` path-safe (no `? : * " < > |`).
 
-**Adding new labels (the recurring task):** Erik hands over batches of ~10-12 label names.
+**Adding new labels (the recurring task) — use the `assess-bandcamp-label` skill**
+(`.claude/skills/assess-bandcamp-label/`). Its `assess_label.py` replaces the ad-hoc probe
+dance for a single label: one command, writes nothing, prices the whole catalogue through
+`album_from_details(...).is_free`, prints every distinct credit string tested against the
+real `VARIOUS_ARTISTS_REGEX`, and evaluates candidate match rules through the actual
+`prefilter()`/`matches()` so a rule that selects nothing is caught before it is added rather
+than months later by `audit_prefilter.py`. The rest of this section is the background.
+
+Erik hands over batches of ~10-12 label names.
 Vet each with `N:/bandcampfree/probe_labels.py "Name" ...` (deep-check candidates with
 `N:/bandcampfree/deepcheck.py "Label=BAND_ID"`; resolves subdomain
 from the search API's `item_url_root`, band_id, catalogue size, VA count, a newest-~14
@@ -240,6 +260,20 @@ post-punk/goth list gave 1 usable label, because commercial vinyl labels sell th
   Because it prefilters it **hides free comps that are not VA-credited** — if the probe shows a
   free title absent from the comp-ish list, use `{}` or `title_regex` instead (Sahel: 14 VA comps
   all paid, the one free item label-credited, so the rule returned nothing).
+  **A wholly dead rule is silent — it looks exactly like "nothing free this week".** The
+  recurring mistake is reading "the comp is credited to the label" as a reason to use
+  `various_artists`; it is the reason NOT to, since the predicate only accepts the literal
+  *Various Artists*. `N:\bandcampfree\audit_prefilter.py` catches it: one `band_details` call
+  per prefiltering label, runs that label's own `prefilter()` over its catalogue, flags any
+  that survive 0 of N. It writes nothing, so it is safe beside a running download. The first
+  run (2026-08-09, 217 labels, 0 errors, ~7 min) found 6 dead rules — Pest Records, Willowtip,
+  File Under_ Records, Dune Altar (all losing free comps, some for years), plus Neon Retro
+  Compilations and LaVideoteque (dead but harmless, everything priced). In four of the six the
+  config comment *stated* the content was label-credited. Re-run it after adding a batch.
+  It only catches total wipeouts — a rule matching 3 of 12 comps still looks healthy, and
+  `min_track_artists`/`track_artists_vary` can't be evaluated at prefilter time at all.
+  **Fixing the rule is only half of it: the missed releases sit behind `newest_release_seen`,
+  so a normal scan still won't see them — always follow with `--full-scan -l "<label>"`.**
   Labels often credit comps several ways at once (`Various Artists`/`V/A`/`V.A.`/label) — match on title.
   **The predicate is anchored**: it matches `Various Artists`/`Various Artist`/`V/A`/`V.A.`,
   the non-English `Varios/Vários Artistas`, `VV.AA.`/`AA.VV.`, and any of those with trailing
@@ -259,7 +293,15 @@ post-punk/goth list gave 1 usable label, because commercial vinyl labels sell th
 - `watch_growth: true` — **not a selection rule**; it never decides what is wanted. Re-checks
   already-downloaded releases for tracks the label added later and reports them as `GROWN`
   with a `--repair ITEM_ID` line. Never queues: repair re-fetches a whole archive, so it stays
-  manual. **It disables the cutoff for that label** (the cutoff skips exactly what needs
+  manual. **`--repair` only works when the label APPENDED tracks.** Filenames embed the track
+  number (`<Artist> - <Album> - NN <Track>.flac`), so tracks *inserted* at the top renumber
+  everything and no local name matches the archive; `extract_missing` then refuses with
+  "would add 44 files but only 10 were expected", which is the guard working, not a bug — it
+  is what stops a directory being duplicated. Nothing is modified, but the ~3 GB archive has
+  already been fetched by then. The only fix is quarantine to `T:\_superseded\<date>\` and a
+  clean re-fetch (Willowtip Sampler 2023, 2026-08-09: 39 local vs 44 remote, 0 filenames in
+  common because 5 tracks went in ahead of the old track 01).
+  **It disables the cutoff for that label** (the cutoff skips exactly what needs
   re-examining, and a release stops being newest long before it stops growing), so every scan
   costs one request per release — PRF's 146 add ~4 min to a sweep. Small catalogues only.
 
@@ -313,6 +355,34 @@ inside it does — a report advances each label's `newest_release_seen` cutoff a
 - Same-titled comp series (e.g. Wiretap's ~15 identical "ATTENTION!" titles) collide in the
   `Artist - Title` folder scheme and overwrite each other on extract — never bulk-download
   them; watch-for-new via a high-water mark instead (see `wiretap-same-title-collision.md`).
+  **That high-water mark IS the release-date cutoff, so `--full-scan` disarms it.** A
+  corpus-wide `--full-scan` on 2026-08-14 re-queued 17 Wiretap comps and the unattended
+  06:00 sweep merged two into one directory — 50 files, track numbers 01-20 doubled, one
+  `bandcamp_item_id.txt`. **Exclude cutoff-protected labels from any all-label full scan**,
+  and verify afterwards by comparing each new directory's file count against the API's
+  `num_tracks` (23 of 24 matched; the mismatch was the merge).
+- **Hand-downloaded back catalogue has no `bandcamp_item_id.txt`, so dedup falls back to
+  title matching and re-downloads it.** All three Wiretap comps fetched that night were
+  already on disk from 2022 under manual date-suffixed names (`… Charity Compilation
+  (2018-08-28)`), which no title match can reach. Fix: quarantine the new copy and write the
+  id file into the *existing* directory. `--backfill-ids` automates this but resolves ids by
+  title, so dry-run it before `--apply` on any same-title series.
+- **Retiring a release needs `state.skipped`, not just a `move`.** Dedup keys on the id file
+  *inside* the directory, so quarantining a folder makes the next sweep re-download it. Put
+  the item id in `state.skipped` with a free-text reason (`scan_label` reports it as an
+  error instead of queueing it). Used 2026-08-14 to retire two omnibus releases that
+  duplicated individual volumes already on disk — labels publish both, each with its own
+  item id, and the rules legitimately match both. Check the volumes cover the omnibus
+  (113 tracks vs 113, 42 vs 42) before moving anything.
+
+**Corpus re-pricing audit** (`N:\bandcampfree\audit-free-download.ps1`, one-off 2026-08-13):
+**`--full-scan` does NOT bypass the state cache.** `freesync.scan_label` short-circuits on
+any entry cached not-free within `RECHECK_DAYS = 90` without re-fetching, so re-pricing means
+dropping those entries first — `N:\bandcampfree\invalidate_priced_cache.py` drops the
+not-free-with-price>0 ones (12,611 of 20,057) and leaves price-0 entries alone. Budget more
+than `ExecutionTimeLimit PT8H`: the run re-priced 19,631 items and was killed at the limit
+while writing its report, losing the report but not the results. It fills `state.pending`,
+which the 06:00 sweep then drains unattended — review that queue before the next 06:00.
 
 ## Key Details
 
