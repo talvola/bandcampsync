@@ -68,7 +68,11 @@ def test_non_downloadable_item_is_not_free():
 
 
 def test_missing_has_digital_download_defaults_to_downloadable():
-    album = album_from_details({"id": 1, "title": "x", "price": 0.0})
+    """Absent means the API did not say, and the common case is downloadable."""
+    album = album_from_details(
+        {"id": 1, "title": "x", "price": 0.0, "num_downloadable_tracks": 3}
+    )
+    assert album.has_digital_download is True
     assert album.is_free is True
 
 
@@ -116,10 +120,15 @@ def test_parse_release_date_handles_absurd_values():
 
 
 def test_album_from_details_tolerates_missing_tracks():
+    """A payload with no track data must parse rather than raise.
+
+    It is not free, though: nothing is downloadable, so there is nothing to obtain for
+    zero. See test_zero_downloadable_tracks_is_not_free.
+    """
     album = album_from_details({"id": 5, "title": "x", "price": 0.0})
     assert album.num_tracks == 0
     assert album.track_artists == []
-    assert album.is_free is True
+    assert album.is_free is False
 
 
 def test_free_instant_download_with_a_nonzero_minimum_price():
@@ -166,4 +175,29 @@ def test_free_download_flag_cannot_rescue_an_undownloadable_item():
         }
     )
     assert album.price == 20.0
+    assert album.is_free is False
+
+
+def test_zero_downloadable_tracks_is_not_free():
+    """has_digital_download true with nothing to download is not free.
+
+    Vinyl-only, CD and cassette listings do this. Before _digital_price they were only
+    reachable at price=None; zeroing the price of every free_download item made a
+    priced listing with no tracks look free too, and three reached the queue in the
+    2026-08-14 audit. Each would have failed with "Release offers no downloads".
+    """
+    album = album_from_details(
+        {
+            "id": 3499470255,
+            "title": "SECRET AGENT - A Pair Of Aces (CD)",
+            "price": 10.0,
+            "is_set_price": False,
+            "free_download": True,
+            "has_digital_download": True,
+            "num_downloadable_tracks": 0,
+            "tracks": [],
+        }
+    )
+    assert album.price == 0.0
+    assert album.num_tracks == 0
     assert album.is_free is False
