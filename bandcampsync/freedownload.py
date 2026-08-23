@@ -156,10 +156,35 @@ def resolve_and_download(
             log.info(f"Single track, moving {name!r} into {local_path}")
             move_file(str(tmp_file), str(local_path / name))
 
-    id_file = local_path / ITEM_INDEX_FILENAME
-    id_file.write_text(f"{album.item_id}\n")
-    log.info(f"Wrote {id_file}")
+    id_file = _write_id_file(local_path, album.item_id)
+    if id_file:
+        log.info(f"Wrote {id_file}")
     return local_path
+
+
+def _write_id_file(local_path, item_id, overwrite=True):
+    """Write bandcamp_item_id.txt, refusing to record a placeholder id.
+
+    An album whose item_id is None used to write the literal string "None".
+    LabelIndex._index then rejects it with "invalid literal for int()" and falls back to
+    title matching, so the directory looks tracked while deduping nothing - silent apart
+    from one warning buried in a scan log. Seven directories were found in that state on
+    2026-08-22. Skipping the write leaves the same title-matching fallback, without the
+    file that hides it.
+    """
+    id_file = Path(local_path) / ITEM_INDEX_FILENAME
+    if not overwrite and id_file.is_file():
+        return None
+    try:
+        value = int(item_id)
+    except (TypeError, ValueError):
+        log.warning(
+            f"No usable item id ({item_id!r}) for {local_path}; not writing "
+            f"{ITEM_INDEX_FILENAME}, dedup falls back to title matching"
+        )
+        return None
+    id_file.write_text(f"{value}\n")
+    return id_file
 
 
 def _target_path(media_dir, label_name, album, content_filename):
@@ -340,9 +365,7 @@ def repair_album(album, spec, config, local_path, gmail_reader=None, temp_dir=No
         # Allow a small margin for artwork and similar non-track files.
         added = extract_missing(tmp_file, local_path, max_additions=expected + 5)
 
-    id_file = Path(local_path) / ITEM_INDEX_FILENAME
-    if not id_file.is_file():
-        id_file.write_text(f"{album.item_id}\n")
+    _write_id_file(local_path, album.item_id, overwrite=False)
     return added
 
 
