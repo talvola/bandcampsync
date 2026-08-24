@@ -1101,9 +1101,15 @@ def do_free_sync(
                 f"Re-run to continue."
             )
             break
+        stats = {}
         try:
             path = acquire_album(
-                album, specs[label_name], config, get_gmail_reader, temp_dir
+                album,
+                specs[label_name],
+                config,
+                get_gmail_reader,
+                temp_dir,
+                stats=stats,
             )
         except Exception as e:
             # Deliberately broad. A transient network fault - curl_cffi raises its own
@@ -1139,7 +1145,17 @@ def do_free_sync(
             state.save()
             done.append((album, None, message))
             continue
-        size = sum(p.stat().st_size for p in path.rglob("*") if p.is_file())
+        # What this album actually cost, as reported by the downloader. Measuring
+        # path instead counts everything ALREADY in that directory, so an album landing
+        # somewhere non-empty is charged for its neighbours too. When several releases
+        # merged into one directory that compounded: on 2026-08-22 a 150-file folder was
+        # charged 35+55+75+110+150 file-loads, ~12.5 GB against 4.3 GB on disk, and the
+        # run stopped at 12 of 17 queued albums having moved barely half the budget.
+        size = stats.get("bytes")
+        if size is None:
+            # Only reached by a caller that does not report; keep the old estimate
+            # rather than charging nothing and letting the budget run away.
+            size = sum(p.stat().st_size for p in path.rglob("*") if p.is_file())
         downloaded_bytes += size
         state.pending.pop(album.item_id, None)
         state.failures.pop(album.item_id, None)

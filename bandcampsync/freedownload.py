@@ -115,11 +115,22 @@ def request_download(label_url, album, email, country, postcode):
 
 
 def resolve_and_download(
-    download_page_url, album, label_name, media_dir, media_format="flac", temp_dir=None
+    download_page_url,
+    album,
+    label_name,
+    media_dir,
+    media_format="flac",
+    temp_dir=None,
+    stats=None,
 ):
     """Download and extract an album from its bandcamp download page.
 
     Returns the local directory the album was extracted to.
+
+    stats, when given, is a dict this fills in with "bytes": how much was actually
+    transferred for THIS album. The caller cannot work that out from the returned path -
+    measuring the directory counts whatever was already in it - so it has to come from
+    here. See the --max-gb accounting in freesync.download_free_albums.
     """
     # Anonymous session: free download URLs are signed and need no account.
     bc = Bandcamp("", require_auth=False)
@@ -140,8 +151,14 @@ def resolve_and_download(
         tmp_file = Path(td) / "download.bin"
         with open(tmp_file, "wb") as fh:
             content_filename = download_file(file_url, fh)
-        size_mb = tmp_file.stat().st_size / (1024 * 1024)
-        log.info(f"Downloaded {content_filename!r} ({size_mb:.1f} MB)")
+        # Read before the single-track branch below, which MOVES tmp_file away.
+        downloaded_bytes = tmp_file.stat().st_size
+        if stats is not None:
+            stats["bytes"] = downloaded_bytes
+        log.info(
+            f"Downloaded {content_filename!r} "
+            f"({downloaded_bytes / (1024 * 1024):.1f} MB)"
+        )
 
         local_path = _target_path(media_dir, label_name, album, content_filename)
         local_path.mkdir(parents=True, exist_ok=True)
@@ -369,11 +386,13 @@ def repair_album(album, spec, config, local_path, gmail_reader=None, temp_dir=No
     return added
 
 
-def acquire_album(album, spec, config, gmail_reader=None, temp_dir=None):
+def acquire_album(album, spec, config, gmail_reader=None, temp_dir=None, stats=None):
     """Request, retrieve and download one free album. Returns the local path.
 
     gmail_reader may be a GmailReader or a zero-argument callable returning one, so the
     caller can defer authorising Gmail until an album actually needs an emailed link.
+
+    stats is passed straight through to resolve_and_download; see its docstring.
     """
     url = request_download(
         spec.subdomain_url, album, config.email, config.country, config.postcode
@@ -393,4 +412,5 @@ def acquire_album(album, spec, config, gmail_reader=None, temp_dir=None):
         config.media_dir,
         media_format=config.media_format,
         temp_dir=temp_dir,
+        stats=stats,
     )

@@ -674,7 +674,7 @@ def test_acquire_album_accepts_a_lazy_gmail_reader(monkeypatch):
     monkeypatch.setattr(
         freedownload,
         "resolve_and_download",
-        lambda url, album, label, media_dir, media_format="flac", temp_dir=None: (
+        lambda url, album, label, media_dir, media_format="flac", temp_dir=None, stats=None: (
             captured.setdefault("url", url)
         ),
     )
@@ -762,7 +762,7 @@ def test_download_loop_survives_a_transient_network_error(tmp_path, monkeypatch)
 
     calls = []
 
-    def fake_acquire(album, spec, cfg, gmail, temp_dir):
+    def fake_acquire(album, spec, cfg, gmail, temp_dir, stats=None):
         calls.append(album.item_id)
         if album.item_id == 1:
             raise _Boom("Resolving timed out after 30008 milliseconds")
@@ -817,7 +817,7 @@ def test_repeated_failures_eventually_give_up(tmp_path, monkeypatch):
 
     config, state_path = _sync_env(tmp_path, [1])
 
-    def always_fails(album, spec, cfg, gmail, temp_dir):
+    def always_fails(album, spec, cfg, gmail, temp_dir, stats=None):
         raise ValueError("Sorry, this item is no longer available for free.")
 
     monkeypatch.setattr("bandcampsync.freedownload.acquire_album", always_fails)
@@ -838,7 +838,7 @@ def test_a_success_clears_the_failure_count(tmp_path, monkeypatch):
     config, state_path = _sync_env(tmp_path, [2])
     calls = {"n": 0}
 
-    def fails_once(album, spec, cfg, gmail, temp_dir):
+    def fails_once(album, spec, cfg, gmail, temp_dir, stats=None):
         calls["n"] += 1
         if calls["n"] == 1:
             raise ValueError("transient")
@@ -1035,7 +1035,7 @@ def test_unavailable_release_is_retryable_not_permanent(tmp_path, monkeypatch):
 
     config, state_path = _sync_env(tmp_path, [1])
 
-    def unavailable(album, spec, cfg, gmail, temp_dir):
+    def unavailable(album, spec, cfg, gmail, temp_dir, stats=None):
         raise ValueError(
             "Release offers no downloads (id 1); it may be temporarily unavailable"
         )
@@ -1055,7 +1055,7 @@ def test_missing_format_is_permanent(tmp_path, monkeypatch):
 
     config, state_path = _sync_env(tmp_path, [2])
 
-    def no_flac(album, spec, cfg, gmail, temp_dir):
+    def no_flac(album, spec, cfg, gmail, temp_dir, stats=None):
         raise ValueError(
             "Download formats does not contain requested encoding: flac "
             "(available encodings: ['mp3-320', 'aac-hi'])"
@@ -1220,3 +1220,137 @@ def test_label_index_ignores_placeholder_id_file(tmp_path):
     idx = LabelIndex(tmp_path, "Some Label")
 
     assert idx.ids == set()
+
+
+# --- --max-gb accounting: charge each album for what IT downloaded ---
+
+
+def test_download_budget_charges_reported_bytes_not_directory_size(
+    tmp_path, monkeypatch
+):
+    """The 2026-08-22 regression: several releases merging into ONE directory made the
+    budget count the whole accumulated folder once per album, so a run stopped at 12 of
+    17 queued albums having moved about half of --max-gb."""
+    from bandcampsync import freesync
+
+    config, state_path = _sync_env(tmp_path, [1, 2, 3])
+    shared = tmp_path / "media" / "L" / "Same Title"
+    charged = []
+
+    def fake_acquire(album, spec, cfg, gmail, temp_dir, stats=None):
+        # Every album lands in the SAME directory and adds one 1 MB file to it, so the
+        # directory grows 1 MB, 2 MB, 3 MB while each download is only ever 1 MB.
+        shared.mkdir(parents=True, exist_ok=True)
+        (shared / f"{album.item_id}.flac").write_bytes(b"x" * 1024 * 1024)
+        if stats is not None:
+            stats["bytes"] = 1024 * 1024
+        charged.append(sum(p.stat().st_size for p in shared.rglob("*") if p.is_file()))
+        return shared
+
+    monkeypatch.setattr("bandcampsync.freedownload.acquire_album", fake_acquire)
+
+    done = freesync.do_free_sync(
+        config, state_path, pending_only=True, max_gb=2.5 / 1024
+    )
+
+    # Directory reached 3 MB, but each album only ever cost 1 MB. Charging directory
+    # size would have spent 1+2 = 3 MB by the second album and stopped early.
+    assert charged[-1] == 3 * 1024 * 1024, "all three should have been attempted"
+    assert sum(1 for _a, p, _e in done if p) == 3
+    assert freesync.FreeState(state_path).pending == {}
+
+
+def test_download_budget_still_stops_when_genuinely_exceeded(tmp_path, monkeypatch):
+    """The budget must still bite - the fix is about accuracy, not removing the cap."""
+    from bandcampsync import freesync
+
+    config, state_path = _sync_env(tmp_path, [1, 2, 3])
+    attempted = []
+
+    def fake_acquire(album, spec, cfg, gmail, temp_dir, stats=None):
+        attempted.append(album.item_id)
+        target = tmp_path / "media" / "L" / f"Album {album.item_id}"
+        target.mkdir(parents=True, exist_ok=True)
+        (target / "t.flac").write_text("x")
+        if stats is not None:
+            stats["bytes"] = 1024 * 1024  # 1 MB each
+        return target
+
+    monkeypatch.setattr("bandcampsync.freedownload.acquire_album", fake_acquire)
+
+    # Budget of 1.5 MB: the first album fits, the second takes the running total past it,
+    # and the loop breaks before the third.
+    freesync.do_free_sync(config, state_path, pending_only=True, max_gb=1.5 / 1024)
+
+    assert attempted == [1, 2], "should stop once the budget is spent"
+    # Whatever did not go out stays queued for the next run.
+    assert set(freesync.FreeState(state_path).pending) == {3}
+
+
+def test_download_budget_falls_back_when_bytes_not_reported(tmp_path, monkeypatch):
+    """A caller that does not fill stats still gets charged something, rather than
+    nothing - which would let an unbounded run ignore --max-gb entirely."""
+    from bandcampsync import freesync
+
+    config, state_path = _sync_env(tmp_path, [1, 2])
+    attempted = []
+
+    def fake_acquire(album, spec, cfg, gmail, temp_dir, stats=None):
+        attempted.append(album.item_id)
+        target = tmp_path / "media" / "L" / f"Album {album.item_id}"
+        target.mkdir(parents=True, exist_ok=True)
+        (target / "t.flac").write_bytes(b"x" * 1024 * 1024)
+        return target  # deliberately reports no stats
+
+    monkeypatch.setattr("bandcampsync.freedownload.acquire_album", fake_acquire)
+
+    freesync.do_free_sync(config, state_path, pending_only=True, max_gb=0.5 / 1024)
+
+    assert attempted == [1], "the fallback measurement must still stop the run"
+
+
+def test_resolve_and_download_reports_the_transferred_size(tmp_path, monkeypatch):
+    """stats["bytes"] is the archive as downloaded, read before the single-track branch
+    moves the temp file away."""
+    from bandcampsync import freedownload
+
+    payload = b"y" * 4096
+
+    class _BC:
+        def __init__(self, *a, **k):
+            pass
+
+        def get_download_file_url(self, item, encoding="flac"):
+            return "https://example.com/x"
+
+    def fake_download_file(url, fh):
+        fh.write(payload)
+        return "Artist - Album.flac"  # not a zip: exercises the move branch
+
+    monkeypatch.setattr(freedownload, "Bandcamp", _BC)
+    monkeypatch.setattr(freedownload, "download_file", fake_download_file)
+    monkeypatch.setattr(freedownload, "stat_download", lambda bc, item, url: url)
+    monkeypatch.setattr(freedownload, "is_zip_file", lambda p: False)
+
+    album = FreeAlbum(
+        item_id=7,
+        title="Album",
+        artist="Artist",
+        url="",
+        price=0.0,
+        is_set_price=False,
+        require_email=False,
+        free_download=False,
+        num_tracks=1,
+    )
+    stats = {}
+    freedownload.resolve_and_download(
+        "https://bandcamp.com/download?id=7",
+        album,
+        "L",
+        tmp_path,
+        temp_dir=str(tmp_path),
+        stats=stats,
+    )
+
+    assert stats["bytes"] == len(payload)
