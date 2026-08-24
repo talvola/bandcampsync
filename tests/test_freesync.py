@@ -1158,3 +1158,65 @@ def test_count_audio_files_missing_directory_returns_none(tmp_path):
     from bandcampsync.freesync import count_audio_files
 
     assert count_audio_files(tmp_path / "nope") is None
+
+
+# --- _write_id_file: never record a placeholder id (see LabelIndex._index) ---
+
+
+def test_write_id_file_writes_integer_id(tmp_path):
+    from bandcampsync.freedownload import _write_id_file
+
+    written = _write_id_file(tmp_path, 883562875)
+
+    assert written == tmp_path / "bandcamp_item_id.txt"
+    assert written.read_text().strip() == "883562875"
+
+
+def test_write_id_file_skips_none_id(tmp_path):
+    from bandcampsync.freedownload import _write_id_file
+
+    assert _write_id_file(tmp_path, None) is None
+    # Nothing written at all: a file containing "None" reads as tracked but dedups
+    # nothing, which is worse than falling back to title matching openly.
+    assert not (tmp_path / "bandcamp_item_id.txt").exists()
+
+
+def test_write_id_file_skips_non_numeric_id(tmp_path):
+    from bandcampsync.freedownload import _write_id_file
+
+    assert _write_id_file(tmp_path, "not-an-id") is None
+    assert not (tmp_path / "bandcamp_item_id.txt").exists()
+
+
+def test_write_id_file_no_overwrite_keeps_existing(tmp_path):
+    from bandcampsync.freedownload import _write_id_file
+
+    id_file = tmp_path / "bandcamp_item_id.txt"
+    id_file.write_text("111\n")
+
+    assert _write_id_file(tmp_path, 222, overwrite=False) is None
+    assert id_file.read_text().strip() == "111"
+
+
+def test_write_id_file_overwrites_by_default(tmp_path):
+    from bandcampsync.freedownload import _write_id_file
+
+    id_file = tmp_path / "bandcamp_item_id.txt"
+    id_file.write_text("111\n")
+
+    _write_id_file(tmp_path, 222)
+
+    assert id_file.read_text().strip() == "222"
+
+
+def test_label_index_ignores_placeholder_id_file(tmp_path):
+    """The bug end to end: a "None" id file must not be treated as a tracked id."""
+    from bandcampsync.freesync import LabelIndex
+
+    album_dir = tmp_path / "Some Label" / "An Artist - An Album"
+    album_dir.mkdir(parents=True)
+    (album_dir / "bandcamp_item_id.txt").write_text("None\n")
+
+    idx = LabelIndex(tmp_path, "Some Label")
+
+    assert idx.ids == set()
