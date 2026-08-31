@@ -38,6 +38,18 @@ dies with `UnicodeEncodeError: 'charmap' codec`. `weekly-report.ps1` already set
 changed: `uvx ruff format` on the whole tree reformats unrelated ones and pollutes the diff.
 **Never `find` the whole media tree** — it times out over SMB. Use `Get-ChildItem -Directory
 -Filter` at depth 1-2, or build a dict from one `iterdir()` pass.
+**Never patch files through a bash heredoc when the content contains Windows paths.**
+`python - <<'PY'` collapses `\\` to `\` in transit, so `"N:\\bandcampsync"` reaches Python as
+`N:\bandcampsync` — where `\b` is a *valid* escape (backspace) and `\w` an invalid one.
+`str.replace()` then silently no-ops and the edit looks like it worked. Use the Edit tool, or
+`Write` a `.py` file and run it. Always `assert s.count(old) == 1` before replacing — without
+it a failed match is indistinguishable from success.
+**Task Scheduler needs PowerShell, not Bash.** `schtasks /Query` via the Bash tool dies with
+`Invalid argument/option - 'C:/Program Files/Git/Query'` — Git Bash rewrites `/Query` as a
+path. Use `Get-ScheduledTask` / `Get-ScheduledTaskInfo`.
+**Squash-merge PRs** (the `(#N)` suffix on most of the history) — Erik pushes after each piece
+of work, so one PR is normally one logical change. Rebase-merge only when a branch genuinely
+carries two unrelated pieces worth keeping apart; either way the history stays linear.
 
 ## Architecture
 
@@ -58,6 +70,11 @@ changed: `uvx ruff format` on the whole tree reformats unrelated ones and pollut
 - `blogsync.py` — Fuzzy Cracklins post extraction, pricing, local dedup index, download, report.
 - `blogplex.py` — Plex collection membership for blog items; drains a queue, never drives a scan.
 
+**Plex tooling lives in a sibling repo**, `C:\projects\plex-mcp-server`: `.env`
+(`PLEX_URL`/`PLEX_TOKEN`, the one place to rotate), `folder_collection_sync.py` (folder→
+collection jobs, with the batching and dead-ratingKey lessons already learned), and an MCP
+server. Music is section 1.
+
 **Sync flow:** Authenticate → index local media → load all Bandcamp purchases → for each purchase: check ignored/preorder/already-downloaded → download archive → extract/copy to `Artist/Album/` → write tracking file or update ignore file → optionally notify external service.
 
 **Deduplication:** Two strategies — `bandcamp_item_id.txt` files in each album directory (default), or a centralized ignore file (`--ignore-file`). The `--skip-item-index` flag skips filesystem traversal entirely, relying solely on the ignore file.
@@ -65,6 +82,10 @@ changed: `uvx ruff format` on the whole tree reformats unrelated ones and pollut
 ## Testing
 
 Tests are in `tests/` using pytest with pytest-mock. Test fixtures (JSON payloads) are in `tests/data/`. Tests mock HTTP responses and verify sync logic, Bandcamp API parsing, and download behavior.
+
+`blogsync`/`blogplex` tests stub the network with small hand-rolled classes (`FakeAPI`,
+`FakePlex`) rather than mocking HTTP, `mocker.patch` module-level functions by path
+(`bandcampsync.blogsync.fetch_post`), and build fake media trees under `tmp_path`.
 
 ## Sync Operations (Erik's Setup)
 
