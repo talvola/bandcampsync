@@ -45,6 +45,7 @@ changed: `uvx ruff format` on the whole tree reformats unrelated ones and pollut
 - `bin/bandcampsync` — CLI script that parses args, reads cookies, calls `do_sync()`
 - `bin/bandcampsync-service` — Docker service runner (scheduled daily sync)
 - `bin/bandcampfree` — CLI for the free/pay-what-you-want label watcher (see below)
+- `bin/bandcampblog` — CLI for the Fuzzy Cracklins blog downloader (see below)
 - `bandcampsync/__init__.py` — Public API exposing `do_sync()` and `Syncer`
 
 **Core modules:**
@@ -54,6 +55,8 @@ changed: `uvx ruff format` on the whole tree reformats unrelated ones and pollut
 - `download.py` — Streaming file download, ZIP extraction, file move/copy operations. Custom exceptions: `DownloadBadStatusCode`, `DownloadInvalidContentType`, `DownloadExpired`.
 - `ignores.py` — `Ignores` manages an ignore file (alternative to `bandcamp_item_id.txt`) and substring-based ignore patterns.
 - `notify.py` — `NotifyURL` sends HTTP GET/POST notifications (e.g., to trigger Plex/Jellyfin library refresh).
+- `blogsync.py` — Fuzzy Cracklins post extraction, pricing, local dedup index, download, report.
+- `blogplex.py` — Plex collection membership for blog items; drains a queue, never drives a scan.
 
 **Sync flow:** Authenticate → index local media → load all Bandcamp purchases → for each purchase: check ignored/preorder/already-downloaded → download archive → extract/copy to `Artist/Album/` → write tracking file or update ignore file → optionally notify external service.
 
@@ -392,6 +395,92 @@ not-free-with-price>0 ones (12,611 of 20,057) and leaves price-0 entries alone. 
 than `ExecutionTimeLimit PT8H`: the run re-priced 19,631 items and was killed at the limit
 while writing its report, losing the report but not the results. It fills `state.pending`,
 which the 06:00 sweep then drains unattended — review that queue before the next 06:00.
+
+## Fuzzy Cracklins Blog Downloader (`bandcampblog`)
+
+A third tool. The monthly post at `fuzzycracklins.substack.com` lists albums that are
+free or name-your-price; this fetches them and queues them for a Plex collection. It is
+neither of the other two: the items are not purchases (so the collection sync cannot see
+them) and they belong to no label (so `bandcampfree`, which is keyed by label, cannot
+either). Everything except discovery is shared code.
+
+```bash
+# --report changes nothing: no downloads, no state written.
+uv run python bin/bandcampblog \
+  -C N:/bandcampfree/labels.yaml -d "N:/Bandcamp (FLAC)" \
+  -s N:/bandcampfree/bandcampblog-state.json \
+  --client-secret N:/bandcampfree/client_secret.json --token N:/bandcampfree/token.json \
+  -t N:/_bcf_temp --report "https://fuzzycracklins.substack.com/p/best-free-music-september-2026"
+
+# Then the same line without --report. --no-plex to skip the collection step;
+# --plex-only (no URL) to drain the queue later, once Plex has scanned.
+```
+**Pass all four `N:` flags**, exactly as for `bandcampfree` — config, state, client secret
+AND token. Missing the last two silently defaults them to `C:\Users\erik\.bandcampfree\`
+and every item dies with "Gmail client secret not found" *after* its `/email_download`
+POST has already fired, so the inbox fills with links for a run that downloaded nothing.
+
+**Non-obvious details, all verified against the live September 2026 post:**
+
+- **Extraction is exact, not fuzzy.** Substack wraps each embed in
+  `<div data-attrs="{...}" data-component-name="BandcampToDOM">`, whose oEmbed JSON holds
+  the canonical URL, artist, title and - inside `embed_url` as `album=4123378065` - the
+  numeric **item id**. No album page is scraped and no title is matched back to an id.
+  The post body is emitted twice (HTML and a JSON blob), so every embed is seen at least
+  twice; `item_id` de-duplicates. 18/18 items extracted.
+- **oEmbed `title` is `"<Album>, by <Artist>"`.** Left as-is it poisons every name
+  comparison and the Plex title search, which look for the bare title - dedup finds
+  nothing and re-downloads albums already owned. Worse, **the suffix is not always the
+  `author` field**: Nosferator's release carries a Latin author (`Nosferator`) and a
+  Cyrillic suffix (`by Носфератор`), so an exact-author strip alone leaves it attached.
+  `_strip_by_suffix` tries the exact suffix, then the last `", by "`, and keeps the
+  original if either would leave the title empty.
+- **`tralbum_details` answers HTTP 200 with `{"error": true}` for a bad band_id**, and
+  `album_from_details` turns that into `price=0.0/num_tracks=0`, which reads as NOT FREE.
+  So a lookup failure is indistinguishable from "now paid" unless `details.get("error")`
+  is checked explicitly. Since the paid list is the entire point of the report, the tool
+  keeps a third bucket - `Could not check` - and never folds errors into `No longer free`.
+- **Pricing goes through `album_from_details(...).is_free`**, the same predicate
+  `bandcampfree` uses, so the `free_download` / `num_tracks` fixes are inherited rather
+  than re-implemented. Cost is 2 requests per album (one `/music` fetch for the band id,
+  cached per artist; one `tralbum_details`).
+- **Dedup is three independent layers, because none suffices alone.** `bandcamp_item_id.txt`
+  is exact but only 3,083 of the 11,939 indexed dirs carry one (the rest are hand-
+  downloaded back catalogue and label grouping dirs); directory names are lenient but
+  miss re-orderings and date suffixes; **Plex is the naming-independent check**, since it
+  indexes tags rather than paths and so sees an album whatever its folder is called and
+  wherever it sits. `LocalIndex` is a depth-2 `iterdir` pass (~2.5 min, 11,939 dirs) -
+  never walk the whole tree.
+- **"Already on disk" means skip the download, NOT skip the item.** It is still queued
+  for the collection: an album you already own is exactly the case where nothing else
+  would ever add it.
+- **New albums land at the ROOT** as `Artist - Album`, matching where 349 of the
+  collection's 409 members already live, via `resolve_and_download(root_level=True)`.
+  That flag exists because `clean_label_dir_name("")` returns `"unknown-label"`, not `""`
+  - do NOT widen `clean_label_dir_name` to fix this, every bandcampfree label directory
+  is named by it. A `Fuzzy Cracklins\` subdirectory was deliberately rejected: it would
+  create a second place for duplicates to hide from the root-level check.
+
+**Plex collection `472199` ("Fuzzy Cracklins", static, subtype=album).** Static matters -
+pushing a static item list into a smart collection yields `subtype=unknown` and crashes
+Plex Web. Credentials come from `plex-mcp-server\.env` (`PLEX_URL`/`PLEX_TOKEN`), one
+place to rotate. Section 1 is Music.
+**`folder_collection_sync.py` cannot maintain this one**, unlike the other seven jobs: its
+members are scattered - 349 at the media root and 60 across ~15 label subdirectories - so
+no single folder contains the collection, and it has been curated by hand. Membership is
+therefore resolved per album and PUT by ratingKey. **One dead ratingKey makes Plex answer
+the whole PUT with HTTP 400, adding nothing**, hence small batches.
+**The collection step is a QUEUE, deliberately.** An album has no ratingKey until Plex has
+scanned it, and this tool does not drive Plex's scanner; downloads land in
+`state.pending`, and a later run adds whatever Plex has since caught up on. Anything not
+yet scanned simply stays queued. Same shape as `freesync`'s `state.pending`.
+
+**First real run (2026-08-31, September post): 18/18, 5.24 GB, 12 min, 0 failures** - 87
+FLAC files, every album's count matching the post's own figures, all with id files.
+Nothing was already owned and nothing had gone paid, so **the dedup and paid paths are
+still unit-tested only, never exercised by live data**. Estimate ~40 s/album when Gmail
+has to resolve a link.
+
 
 ## Key Details
 

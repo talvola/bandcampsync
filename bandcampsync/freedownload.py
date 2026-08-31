@@ -122,6 +122,7 @@ def resolve_and_download(
     media_format="flac",
     temp_dir=None,
     stats=None,
+    root_level=False,
 ):
     """Download and extract an album from its bandcamp download page.
 
@@ -131,6 +132,13 @@ def resolve_and_download(
     transferred for THIS album. The caller cannot work that out from the returned path -
     measuring the directory counts whatever was already in it - so it has to come from
     here. See the --max-gb accounting in freesync.download_free_albums.
+
+    root_level places the album directly under media_dir instead of under a label
+    grouping directory. Only blogsync needs it: a blog-sourced album belongs to no label,
+    and clean_label_dir_name("") returns "unknown-label" rather than "", so an empty
+    label_name cannot express it. Deliberately a flag here rather than a change to
+    clean_label_dir_name, which every existing bandcampfree label directory is named by -
+    widening that would rename them all and re-download the corpus.
     """
     # Anonymous session: free download URLs are signed and need no account.
     bc = Bandcamp("", require_auth=False)
@@ -160,7 +168,9 @@ def resolve_and_download(
             f"({downloaded_bytes / (1024 * 1024):.1f} MB)"
         )
 
-        local_path = _target_path(media_dir, label_name, album, content_filename)
+        local_path = _target_path(
+            media_dir, label_name, album, content_filename, root_level=root_level
+        )
         local_path.mkdir(parents=True, exist_ok=True)
         if is_zip_file(tmp_file):
             log.info(f"Extracting to {local_path}")
@@ -204,8 +214,8 @@ def _write_id_file(local_path, item_id, overwrite=True):
     return id_file
 
 
-def _target_path(media_dir, label_name, album, content_filename):
-    """Place the release under media_dir/<label>/<name>.
+def _target_path(media_dir, label_name, album, content_filename, root_level=False):
+    """Place the release under media_dir/<label>/<name>, or media_dir/<name> at root level.
 
     Mirrors LocalMedia.get_path_for_zip_purchase for the label case: the zip filename is
     "Artist - Album.zip" where Artist is the real album artist, and the label name is the
@@ -222,7 +232,7 @@ def _target_path(media_dir, label_name, album, content_filename):
     # Label grouping dir uses the narrower cleaner, matched by LabelIndex. The album
     # directory below still uses clean_path_component, which LocalMedia._normalize_for_match
     # compares leniently.
-    label_dir = media_dir / clean_label_dir_name(label_name)
+    label_dir = media_dir if root_level else media_dir / clean_label_dir_name(label_name)
     if getattr(album, "item_type", "a") in ("t", "track"):
         return label_dir / clean(f"{album.artist} - {album.title}")
     if content_filename:
