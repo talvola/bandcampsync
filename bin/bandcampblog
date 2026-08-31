@@ -90,11 +90,13 @@ if __name__ == '__main__':
             temp_dir=args.temp_dir or None,
         )
 
-    added = unresolved = []
+    added = unresolved = unaddable = []
     if not args.no_plex and state.pending:
         try:
             collection = PlexCollection(args.collection, env_path=args.plex_env or None)
-            added, unresolved = drain_pending(state, collection, apply=not args.report)
+            added, unresolved, unaddable = drain_pending(
+                state, collection, apply=not args.report
+            )
         except Exception as e:
             # Never fatal: the albums are downloaded and still queued, so a Plex outage
             # costs nothing but a later run.
@@ -111,9 +113,15 @@ if __name__ == '__main__':
             print(f'  + {entry["artist"]} / {entry["title"]}  (ratingKey {rating_key})',
                   file=sys.stdout)
     if unresolved:
-        print(f'\n{len(unresolved)} album(s) not yet scanned by Plex, still queued:',
+        print(f'\n{len(unresolved)} album(s) Plex could not identify, still queued:',
               file=sys.stdout)
         for _, entry in unresolved:
             print(f'  . {entry["artist"]} / {entry["title"]}', file=sys.stdout)
+    if unaddable:
+        verb = 'would be retired' if args.report else 'retired'
+        print(f'\n{len(unaddable)} item(s) {verb} - cannot join this collection:',
+              file=sys.stdout)
+        for _, entry, reason in unaddable:
+            print(f'  - {entry["artist"]} / {entry["title"]}: {reason}', file=sys.stdout)
 
     sys.exit(0)

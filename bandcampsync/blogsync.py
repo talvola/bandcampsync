@@ -87,6 +87,9 @@ class BlogState:
     path: Path | None = None
     pending: dict = field(default_factory=dict)
     added: dict = field(default_factory=dict)
+    # Items that can never join the collection, with a reason. Same idea as
+    # freesync's state.skipped: without it they are retried on every single run.
+    skipped: dict = field(default_factory=dict)
 
     @classmethod
     def load(cls, path):
@@ -99,6 +102,7 @@ class BlogState:
             path=path,
             pending={int(k): v for k, v in (data.get("pending") or {}).items()},
             added={int(k): v for k, v in (data.get("added") or {}).items()},
+            skipped={int(k): v for k, v in (data.get("skipped") or {}).items()},
         )
 
     def save(self):
@@ -111,6 +115,7 @@ class BlogState:
                 {
                     "pending": {str(k): v for k, v in self.pending.items()},
                     "added": {str(k): v for k, v in self.added.items()},
+                    "skipped": {str(k): v for k, v in self.skipped.items()},
                 },
                 f,
                 indent=2,
@@ -124,13 +129,17 @@ class BlogState:
         Stores bandcamp's artist/title in preference to the blog's: the Plex search
         matches against tags, which came from the same metadata bandcamp serves.
         """
-        if item.item_id in self.added:
+        if item.item_id in self.added or item.item_id in self.skipped:
             return
         self.pending[item.item_id] = {
             "artist": (album.artist if album else "") or item.artist,
             "title": (album.title if album else "") or item.title,
             "url": item.url,
             "path": str(local_path) if local_path else "",
+            # Carried so the collection step can tell a standalone track from an album
+            # without re-fetching the post: a track has no album row in Plex and could
+            # not join an album-subtype collection anyway.
+            "item_type": item.item_type,
         }
 
 

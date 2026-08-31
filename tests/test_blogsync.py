@@ -329,3 +329,24 @@ def test_report_prefers_bandcamps_names_over_the_blogs():
     text = format_report("post", [result])
     assert "Real Artist / Real Title" in text
     assert "Blog Artist" not in text
+
+
+def test_queue_records_item_type_so_tracks_can_be_told_apart(tmp_path):
+    state = BlogState(path=tmp_path / "s.json")
+    state.queue(BlogItem(7, "t", "u", "Doom Blues", "November Fire"))
+    assert state.pending[7]["item_type"] == "t"
+
+
+def test_state_does_not_requeue_something_already_skipped(tmp_path):
+    # Without this a standalone track is retried on every single run, forever.
+    state = BlogState(path=tmp_path / "s.json")
+    state.skipped[7] = {"reason": "standalone track"}
+    state.queue(BlogItem(7, "t", "u", "T", "A"))
+    assert state.pending == {}
+
+
+def test_skipped_round_trips(tmp_path):
+    state = BlogState(path=tmp_path / "s.json")
+    state.skipped[7] = {"artist": "A", "title": "T", "reason": "why"}
+    state.save()
+    assert BlogState.load(tmp_path / "s.json").skipped[7]["reason"] == "why"
