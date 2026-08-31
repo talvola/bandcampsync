@@ -475,11 +475,36 @@ scanned it, and this tool does not drive Plex's scanner; downloads land in
 `state.pending`, and a later run adds whatever Plex has since caught up on. Anything not
 yet scanned simply stays queued. Same shape as `freesync`'s `state.pending`.
 
-**First real run (2026-08-31, September post): 18/18, 5.24 GB, 12 min, 0 failures** - 87
-FLAC files, every album's count matching the post's own figures, all with id files.
-Nothing was already owned and nothing had gone paid, so **the dedup and paid paths are
-still unit-tested only, never exercised by live data**. Estimate ~40 s/album when Gmail
-has to resolve a link.
+**Runs to date.** September post: 18/18, 5.24 GB, 12 min, 0 failures, 87 FLAC files.
+August post: 21 items - 14 downloaded (3.59 GB), 4 already on disk, **3 had gone paid**
+($1, $2, $9). Every track count matched the post's own figures both times. Estimate
+~40 s/album when Gmail has to resolve a link.
+
+**Posts overlap, so cross-month dedup is load-bearing.** `The Slow Blade / There Is No
+Other Shore` appears in BOTH the August and September posts; running them an hour apart,
+the id file written by the first run is what stopped the second re-downloading it. Two
+more August items matched inside *label* subdirectories (`RumbleMusicPromotions\`,
+`Weedian\`) rather than at the root - which is why the local index has to descend a
+level rather than just listing the root.
+
+**Plex's tags routinely disagree with bandcamp, so `find_album` cannot just compare
+names.** Weedian's June compilation is `WEEDIAN / The Best Releases of June 2026` on
+bandcamp and `Various Artists / Weedian: The Best Releases of June 2026` in Plex - a
+label prefix on the title and a VA credit for the artist, so neither field matches.
+Matching therefore goes strongest-evidence first: **the candidate's own file path against
+the directory we downloaded to** (decisive, and immune to retagging - hence
+`LOCAL_MEDIA_ROOT`/`PLEX_MEDIA_ROOT`, since `N:` and `/share/Music` are the same files),
+then exact artist+title, then a *unique* candidate whose title contains ours or vice
+versa. Requiring uniqueness in that last step is what keeps it safe.
+
+**A standalone track can never join this collection.** Collection 472199 is
+`subtype=album`, and a `track`-type release has no album row in Plex at all - a title
+search returns 0 hits forever, not "not scanned yet". `November Fire / Doom Blues` (the
+one `item_type: "t"` in the August post) is the worked example. Such items are retired to
+`state.skipped` with a reason rather than retried on every run, the same convention
+[[retiring-a-release-needs-state-skipped]] uses on the bandcampfree side. **So an
+unresolved item means one of two quite different things** - not yet scanned, or never
+addable - and only the queue distinguishes them.
 
 
 ## Key Details
