@@ -1,0 +1,119 @@
+#!/usr/bin/env python
+
+
+import argparse
+import sys
+from pathlib import Path
+
+from bandcampsync import logger, version
+from bandcampsync.blogplex import (
+    FUZZY_CRACKLINS_COLLECTION,
+    PlexCollection,
+    drain_pending,
+)
+from bandcampsync.blogsync import BlogState, format_report, sync_post
+from bandcampsync.labelconfig import load_config
+
+log = logger.get_logger('runblog')
+
+
+if __name__ == '__main__':
+    parser = argparse.ArgumentParser(
+        prog='bandcampblog',
+        description='Downloads the free albums listed in a Fuzzy Cracklins blog post and '
+                    'adds them to a Plex collection',
+    )
+    parser.add_argument('url', nargs='?', default='',
+        help='URL of the blog post to process')
+    parser.add_argument('-v', '--version', action='store_true',
+        help='Displays the bandcampsync version and exits')
+    parser.add_argument('-C', '--config', default='',
+        help='Path to the YAML config, read for defaults.email/country/postcode/media_dir')
+    parser.add_argument('-d', '--directory', default='',
+        help='Path to the media directory, overrides defaults.media_dir in the config')
+    parser.add_argument('-s', '--state', default='',
+        help='Path to the blog state file (default: alongside the config as '
+             'bandcampblog-state.json)')
+    parser.add_argument('--report', action='store_true',
+        help='Report what would be downloaded without downloading or writing anything')
+    parser.add_argument('-t', '--temp-dir', default='',
+        help='Path to use for temporary downloads')
+    parser.add_argument('--collection', type=int, default=FUZZY_CRACKLINS_COLLECTION,
+        help='Plex collection ratingKey to add downloaded albums to')
+    parser.add_argument('--plex-env', default='',
+        help="Path to the .env holding PLEX_URL/PLEX_TOKEN (default: plex-mcp-server's)")
+    parser.add_argument('--no-plex', action='store_true',
+        help='Skip the Plex collection step entirely; downloads still queue for later')
+    parser.add_argument('--plex-only', action='store_true',
+        help='Only drain the queue of albums waiting to be added to the collection. Use '
+             'after Plex has scanned; downloads nothing and fetches no blog post.')
+    parser.add_argument('--client-secret',
+        default=str(Path.home() / '.bandcampfree' / 'client_secret.json'),
+        help='Path to the Google OAuth desktop client JSON')
+    parser.add_argument('--token', default=str(Path.home() / '.bandcampfree' / 'token.json'),
+        help='Path to the Gmail OAuth token')
+    args = parser.parse_args()
+
+    if args.version:
+        print(f'BandcampSync version: {version}', file=sys.stdout)
+        sys.exit(0)
+
+    if not args.url and not args.plex_only:
+        parser.error('a blog post URL is required unless --plex-only is given')
+
+    config = load_config(args.config) if args.config else None
+    if config is None:
+        parser.error('-C/--config is required (it supplies email, country and postcode)')
+    if args.directory:
+        config.media_dir = Path(args.directory)
+    if not config.media_dir:
+        parser.error('no media directory: pass -d or set defaults.media_dir in the config')
+
+    state_path = Path(args.state) if args.state else \
+        Path(args.config).parent / 'bandcampblog-state.json'
+    state = BlogState.load(state_path)
+
+    # Gmail is authorised lazily: most albums return a download URL directly and never
+    # need it, and authorising up front would prompt on runs that do not.
+    def gmail_reader():
+        from bandcampsync.gmail import GmailReader, load_credentials
+        return GmailReader(load_credentials(args.client_secret, args.token))
+
+    results = []
+    if not args.plex_only:
+        results = sync_post(
+            args.url,
+            config,
+            state,
+            report_only=args.report,
+            gmail_reader=gmail_reader,
+            temp_dir=args.temp_dir or None,
+        )
+
+    added = unresolved = []
+    if not args.no_plex and state.pending:
+        try:
+            collection = PlexCollection(args.collection, env_path=args.plex_env or None)
+            added, unresolved = drain_pending(state, collection, apply=not args.report)
+        except Exception as e:
+            # Never fatal: the albums are downloaded and still queued, so a Plex outage
+            # costs nothing but a later run.
+            log.error(f'Plex collection step failed (albums stay queued): {e}')
+
+    if results:
+        print(format_report(args.url, results, pending_count=len(state.pending)),
+              file=sys.stdout)
+    if added:
+        verb = 'Would add' if args.report else 'Added'
+        print(f'\n{verb} {len(added)} album(s) to Plex collection {args.collection}:',
+              file=sys.stdout)
+        for _, entry, rating_key in added:
+            print(f'  + {entry["artist"]} / {entry["title"]}  (ratingKey {rating_key})',
+                  file=sys.stdout)
+    if unresolved:
+        print(f'\n{len(unresolved)} album(s) not yet scanned by Plex, still queued:',
+              file=sys.stdout)
+        for _, entry in unresolved:
+            print(f'  . {entry["artist"]} / {entry["title"]}', file=sys.stdout)
+
+    sys.exit(0)
