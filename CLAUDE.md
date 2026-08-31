@@ -141,9 +141,14 @@ bandcampfree process is running (they share the media root and the NAS link). Bo
 later on 2026-08-08 to clear Plex's ~02:00 database-backup window, and the order was flipped
 at the same time: the sweep can run 3.5 h, and while it does, this job would skip and lose a
 whole day. Short job first. Same
-daily-trigger/6.5-day-due/`logs\.last-success` shape as the free sweep, so an unmounted N:
-retries tomorrow. Unlike the free sweep it **downloads** (items are already paid for; no
-approval step). Quiet weeks write only a one-line `logs\sync.log` entry; a dated file in
+daily-trigger/due-check/`logs\.last-success` shape as the free sweep, so an unmounted N:
+retries tomorrow. **Interval is 0.8 days as of 2026-08-30 — it syncs every day** (was 6.5).
+Under 1.0 rather than exactly 1.0 because the stamp is written at the *end* of the run, so the
+age at the next 05:30 trigger is 1.0 minus the run length; `1.0` would skip every other day.
+0.8 covers a run of up to 4.8 h, the whole `TimeoutMinutes` window. **Run length is 3 min at a
+quiet 05:30 but 15 min midday** (2,601 purchases, contended SMB) — don't quote 3 min as typical.
+Unlike the free sweep it **downloads** (items are already paid for; no
+approval step). Quiet days write only a one-line `logs\sync.log` entry; a dated file in
 `N:\bandcampsync\logs\` means something happened. `-ReportOnly` and `-Force` are for testing —
 `-ReportOnly` deliberately writes no success stamp.
 **`Start-Process -ArgumentList` does not quote**, so `N:\Bandcamp (FLAC)` splits into three
@@ -315,10 +320,14 @@ same machine. `[needs email]` is no longer the driver (Gmail resolves in <1 min 
 track count predict nothing (a 6-track album was 1.15 GB, a 20-track comp 0.46 GB).
 
 **Recurring sweep (set up 2026-07-28, made self-downloading 2026-08-07).** Scheduled task
-**"BandcampFree Weekly Sweep"** runs `N:\bandcampfree\weekly-report.ps1` daily at 06:00; it
-scans all labels only when ~7 days have passed (`reports\.last-success` stamp), then drains
-the queue it just filled with `--pending-only --max-gb 15`. Output lands in
-`N:\bandcampfree\reports\`, one summary line per run in `sweep.log`, and **a sweep that finds
+**"BandcampFree Weekly Sweep"** runs `N:\bandcampfree\weekly-report.ps1` daily at 06:00, then
+drains the queue it just filled with `--pending-only --max-gb 15`.
+**Interval is 0.8 days as of 2026-08-30 — it scans every day** (was 6.5, `reports\.last-success`
+stamp). The old interval was never about release completeness, it was API politeness; a scan is
+still one pass at `request_delay` 1s and measured 20-67 min for 436 labels. **The thing to watch
+is `errors=N` on the scan line in `sweep.log`** — HTTP 429 truncates a label's catalogue
+*silently*, so a sustained nonzero count means back the interval off rather than push through.
+Output lands in `N:\bandcampfree\reports\`, one summary line per run in `sweep.log`, and **a sweep that finds
 nothing writes no report file**. The dated report holds both what the scan wanted and a
 `=== download ===` section of what landed. A daily trigger plus the due-check is the retry
 mechanism: when N: is unmounted the run logs a SKIP, exits 0 and leaves the stamp alone, so it
@@ -326,10 +335,10 @@ retries tomorrow. Guards: share reachable, sweep due, and no other bandcampfree 
 running (`scan_all()` rewrites `state.json`, so an overlapping manual download would corrupt
 the pending queue).
 **The stamp is written on a successful SCAN, not a successful download** — the scan is the
-rate-limited half, so a failed download must not trigger a 425-label re-scan every morning.
-Whatever did not land stays in `state.pending`. **A not-due run still drains a non-empty
+rate-limited half, so a failed download must not cost a second 436-label scan on top of the
+one the next morning already does. Whatever did not land stays in `state.pending`. **A not-due run still drains a non-empty
 queue** (guard 3, "not due ... but N queued - draining"): draining issues no per-label
-requests, so an item queued on Monday goes out that night instead of waiting up to a week for
+requests, so an item queued between scans goes out that night rather than waiting for
 the next scan. Its log goes to `reports\drain-<stamp>.txt` and it writes no stamp — a drain is
 not a scan. The concurrency guard therefore runs *before* the due check, since both paths
 download. Anything past `--max-gb` waits for the next run the same way. `-NoDownload` restores the old approve-first behaviour; task
