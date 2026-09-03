@@ -130,8 +130,9 @@ as "never tracked" when it is.
 
 **Albums that grow after release are invisible to the sync.** Running yearly collections
 (`Unwoman - 2026 Subscriber-Only Originals`) and monthly tribute comps (`PRF Monthly Tribute
-Series`, 145 dirs, **not** a bandcampfree label — it syncs as a purchase) gain tracks for weeks
-after they first appear. `sync_item` skips on `is_locally_downloaded*`, a yes/no on the
+Series`, 146 dirs — its back catalogue arrived as collection purchases, but it has ALSO been a
+bandcampfree label with `watch_growth: true` since 2026-08-08, which is what monitors it now)
+gain tracks for weeks after they first appear. `sync_item` skips on `is_locally_downloaded*`, a yes/no on the
 directory existing, and the `item_id` does not change when tracks are added, so the first
 partial download is final. `--check-growth` (report-only) finds them: the collection payload
 already carries `num_streamable_tracks`, so comparing it against a local audio-file count costs
@@ -144,8 +145,9 @@ while the purchase still downloads fine. Doing so wrongly excluded 5 of 28 — e
 turned out to need refetching. The only authoritative check is the **collection download link**
 (`get_download_file_url`), the same path the sync itself uses. There is no repair path on this side
 yet; `bandcampfree --repair ITEM_ID` exists only for labels. Beware acting on a row flagged
-`no id file` or `AMBIGUOUS` — PRF's 145 dirs have zero `bandcamp_item_id.txt` files, so matching
-falls back to the lenient name path and a re-fetch could write a duplicate instead of topping up.
+`no id file` or `AMBIGUOUS` — only 18 of PRF's 146 dirs carry a `bandcamp_item_id.txt` (the
+hand-downloaded back catalogue has none), so matching falls back to the lenient name path and a
+re-fetch could write a duplicate instead of topping up.
 
 **The report is lenient, the sync is strict — `Missing: N` UNDERCOUNTS what a sync will fetch.**
 In zip mode `report.classify_item` accepts three ways of being "downloaded" (id file/ignore
@@ -410,7 +412,9 @@ inside it does — a report advances each label's `newest_release_seen` cutoff a
 
 **Corpus re-pricing audit** (`N:\bandcampfree\audit-free-download.ps1`, one-off 2026-08-13):
 **`--full-scan` does NOT bypass the state cache.** `freesync.scan_label` short-circuits on
-any entry cached not-free within `RECHECK_DAYS = 90` without re-fetching, so re-pricing means
+any entry cached not-free within `RECHECK_DAYS = 90` without re-fetching (**except entries
+with `num_tracks == 0`, which get `EMPTY_RECHECK_HOURS = 12` since 2026-09-03** — an empty page
+is not a price, and PRF publishes each month's comp empty), so re-pricing means
 dropping those entries first — `N:\bandcampfree\invalidate_priced_cache.py` drops the
 not-free-with-price>0 ones (12,611 of 20,057) and leaves price-0 entries alone. Budget more
 than `ExecutionTimeLimit PT8H`: the run re-priced 19,631 items and was killed at the limit
