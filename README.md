@@ -278,6 +278,97 @@ another format with the `--format` argument. Common Bandcamp download formats ar
 | `wav`           | Uncompressed audio format. Biggest file size. Original quality. |
 
 
+## Albums that grow after release
+
+Some releases gain tracks for weeks after they first appear. Running yearly collections do
+it, and so do monthly compilation series: the
+[PRF Monthly Tribute Series](https://prfmonthlytributeseries.bandcamp.com/) posts each
+month's tribute with a handful of tracks at the start of the month and keeps adding until a
+few days into the next one - `August 2026: Minutemen` went live with 2 tracks and finished
+with 27.
+
+Nothing in the normal sync notices this. The release date does not move, so a date cutoff
+hides the release; the item ID does not change when tracks are added; and the directory
+already exists, so both `bandcampsync` and `bandcampfree` call it downloaded. **The first
+partial download is final unless something goes looking.** Two things do:
+
+### `bandcampsync --check-growth` (collection purchases)
+
+A report-only pass over your Bandcamp collection. The collection payload already carries
+`num_streamable_tracks`, so comparing it against a count of local audio files costs no extra
+request:
+
+```bash
+$ bandcampsync -c cookies.txt -d /media --check-growth
+```
+
+There is no repair path on the collection side. To re-fetch a flagged album, move its
+directory **outside the media tree** (not to a sibling directory your media server also
+scans, or every replaced album appears twice) and run a normal sync. Deleting only
+`bandcamp_item_id.txt` is not enough in `--dir-format zip` mode, where the directory name
+alone counts as proof of download.
+
+Do not "verify" a candidate against the public mobile API. `num_downloadable_tracks`
+undercounts, because bonus tracks and alternate versions ship in the download without being
+publicly streamable, and a withdrawn album reports 0 while the purchase still downloads
+fine. The authoritative check is the collection download link the sync itself uses.
+
+### `watch_growth: true` (label releases, `bandcampfree`)
+
+A per-label match rule in `labels.yaml`:
+
+```yaml
+  - name: PRF Monthly Tribute Series
+    url: https://prfmonthlytributeseries.bandcamp.com/
+    band_id: 4195141223
+    match:
+      watch_growth: true
+```
+
+It is **not a selection rule** - it never decides whether an album is wanted, and a `match`
+containing only `watch_growth` still takes every free release. What it does is re-examine
+releases that are already downloaded, compare the local audio-file count against the API's
+`num_tracks`, and report the difference:
+
+```
+  GROWN PRF Monthly Tribute Series - August 2026: Minutemen
+          2 local file(s), 27 tracks now listed
+          top up with: --repair 4105675225
+```
+
+It never queues the top-up itself, because a repair re-fetches the album's whole archive to
+extract a few files. Run it by hand, and pass `-l` so the item does not have to be located
+by listing every label's discography:
+
+```bash
+$ bandcampfree -C labels.yaml -s state.json -t /tmp/bcf \
+    -l "PRF Monthly Tribute Series" --repair 4105675225
+```
+
+`watch_growth` also **disables the release-date cutoff for that label**, since the cutoff
+skips exactly the releases that need re-checking - a release stops being the newest long
+before it stops growing. Every scan therefore costs one request per release, so use it only
+on small catalogues.
+
+A series like this publishes the month's page *before* its first track, and an album with no
+tracks is not free (there is nothing to download), so the scan classifies it as not-free and
+caches that. A not-free verdict normally holds for `RECHECK_DAYS`, which would hide the release
+for a whole quarter - long after the month finished - and neither the cutoff nor `watch_growth`
+would rescue it, because both act on releases that got past the cache. Entries with no tracks
+therefore expire after `EMPTY_RECHECK_HOURS` instead, so a nightly scan re-prices them until
+they fill up.
+
+**`--repair` only works when the label appended tracks.** Filenames embed the track number
+(`<Artist> - <Album> - NN <Track>.flac`), so tracks *inserted* ahead of existing ones
+renumber everything and no local filename matches the archive. The extract step then refuses
+with `would add 44 files but only 10 were expected` - that guard is what stops a directory
+being silently duplicated, and nothing is modified, but the archive has already been
+downloaded by then. The fallback is the same as on the collection side: move the directory
+out of the media tree and let the next scan fetch it clean. Moving takes
+`bandcamp_item_id.txt` with it, which is what makes the release eligible again. Do not use
+`state.skipped` for this - that retires a release permanently.
+
+
 # Contributing
 
 All properly formatted and sensible pull requests, issues, and comments are welcome.

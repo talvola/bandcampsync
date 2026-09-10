@@ -3,7 +3,13 @@ from datetime import datetime, timezone
 
 from bandcampsync.labels import DiscoEntry, FreeAlbum
 from bandcampsync.labelconfig import LabelSpec, prefilter
-from bandcampsync.freesync import FreeState, LabelIndex, RECHECK_DAYS, resolve_cutoff
+from bandcampsync.freesync import (
+    EMPTY_RECHECK_HOURS,
+    FreeState,
+    LabelIndex,
+    RECHECK_DAYS,
+    resolve_cutoff,
+)
 
 
 def _album(**kwargs):
@@ -173,6 +179,29 @@ def test_paid_classification_expires_for_recheck(tmp_path):
     assert state.cached(42) is not None
     state.items[42]["checked_ts"] = time.time() - (RECHECK_DAYS + 1) * 86400
     assert state.cached(42) is None
+
+
+def test_empty_release_rechecked_within_a_day(tmp_path):
+    """A page with no tracks yet must not be pinned as not-free for a quarter.
+
+    PRF publishes a month's tribute comp empty and adds tracks all month. Cached under
+    RECHECK_DAYS it would stay invisible until long after it finished.
+    """
+    state = FreeState(tmp_path / "s.json")
+    state.cache(_album(num_tracks=0), is_free=False)
+    assert state.cached(42) is not None  # still fresh
+    state.items[42]["checked_ts"] = time.time() - (EMPTY_RECHECK_HOURS + 1) * 3600
+    assert state.cached(42) is None
+    # ... and well inside the window a priced album would still be cached for.
+    assert (EMPTY_RECHECK_HOURS + 1) * 3600 < RECHECK_DAYS * 86400
+
+
+def test_priced_release_with_tracks_keeps_the_long_window(tmp_path):
+    """The short window is only for empty pages, not for anything merely cheap."""
+    state = FreeState(tmp_path / "s.json")
+    state.cache(_album(price=5.0, num_tracks=12), is_free=False)
+    state.items[42]["checked_ts"] = time.time() - (EMPTY_RECHECK_HOURS + 1) * 3600
+    assert state.cached(42) is not None
 
 
 def test_state_roundtrip(tmp_path):

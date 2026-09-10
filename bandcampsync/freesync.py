@@ -39,6 +39,9 @@ log = get_logger("freesync")
 ITEM_INDEX_FILENAME = "bandcamp_item_id.txt"
 # Non-free albums are re-checked after this many days in case a price has changed.
 RECHECK_DAYS = 90
+# Non-free albums with no tracks at all are re-checked after this many hours instead. Sub-
+# daily, so a nightly sweep always re-prices them. See FreeState.cached.
+EMPTY_RECHECK_HOURS = 12
 # Give up on an album after this many consecutive failed download attempts.
 MAX_DOWNLOAD_ATTEMPTS = 3
 
@@ -199,8 +202,19 @@ class FreeState:
             return None
         if entry.get("is_free"):
             return entry
-        checked = entry.get("checked_ts", 0)
-        if time.time() - checked > RECHECK_DAYS * 86400:
+        age = time.time() - entry.get("checked_ts", 0)
+        if not entry.get("num_tracks"):
+            # Not free *and* no tracks is not a pricing verdict, it is an empty page.
+            # Some of those never fill (physical-only listings), but some are releases
+            # published ahead of their content: PRF posts a month's tribute comp empty
+            # and adds tracks all month. Holding a not-free verdict for RECHECK_DAYS
+            # would hide such a release for a whole quarter - long after it finished -
+            # and neither the cutoff nor watch_growth would save it, because both act
+            # on releases that got past this cache. Re-check sub-daily instead; there
+            # are few enough empty pages corpus-wide for the extra requests not to
+            # matter, and most sit behind a cutoff and are never fetched at all.
+            return None if age > EMPTY_RECHECK_HOURS * 3600 else entry
+        if age > RECHECK_DAYS * 86400:
             return None
         return entry
 
