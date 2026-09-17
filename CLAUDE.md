@@ -116,6 +116,9 @@ uv run python bin/bandcampsync \
 - **Manually downloaded items:** The report auto-detects them by name/ID match; no manual tracking needed before syncing.
 - **Report runtime:** ~5 minutes (indexes all local media first). Always run report before full sync.
 
+**To sync on demand (a Bandcamp Friday haul), run the CLI directly — not `weekly-sync.ps1
+-Force`**, which writes `logs\.last-success` and would make the next 05:30 run skip a day.
+
 **To refetch an album — the collection side has no `--repair`:** move its directory to
 **`T:\_superseded\<date>\`**, then run the normal sync. **Quarantine outside the media share, not
 under `N:`** — Plex scans the Music share, so an old copy parked at `N:\_superseded\` gets indexed
@@ -332,9 +335,35 @@ post-punk/goth list gave 1 usable label, because commercial vinyl labels sell th
   already been fetched by then. The only fix is quarantine to `T:\_superseded\<date>\` and a
   clean re-fetch (Willowtip Sampler 2023, 2026-08-09: 39 local vs 44 remote, 0 filenames in
   common because 5 tracks went in ahead of the old track 01).
+  **Before quarantining for a re-fetch, list tracks present LOCALLY but absent REMOTELY** — the
+  re-fetch drops them. 2 of the 6 Weedian albums re-fetched 2026-09-06 were remove-plus-insert,
+  not pure inserts (`Trip to Ohio`/`Grael - Fur`, `Trip to South Carolina`/`Waft - Fangs Of
+  Pareidolia`); copy those back from quarantine afterwards. Trigger the re-fetch with
+  `--full-scan -l "<label>"` — the quarantined dir is gone from `LabelIndex`, but its old
+  release date sits behind the cutoff. Check `state.pending` is empty first.
   **It disables the cutoff for that label** (the cutoff skips exactly what needs
   re-examining, and a release stops being newest long before it stops growing), so every scan
   costs one request per release — PRF's 146 add ~4 min to a sweep. Small catalogues only.
+  **Always pass `-l "<label>"` to `--repair`** — otherwise `do_repair` finds the owning label by
+  listing discographies in config order, ~11 min for a label late in the file, before the
+  download even starts.
+  **A rename or track swap DOES repair, unlike an insert.** `_track_keys` keys on the filename
+  minus the shared album prefix, so a retitled track is a new key: it is added and the
+  superseded file kept. Erik wants both — the album ends one track ahead of bandcamp with two
+  files sharing a track number (Weedian Louisiana #30, North Carolina #32, 2026-09-05).
+  **Never put an item in `state.skipped` on a watch_growth label.** `scan_label` reports it as
+  `STATUS_ERROR`, and with no cutoff it is re-examined every scan, so `errors=` on the sweep
+  line sits at 1 forever — the existing 10 skipped items are invisible only because their
+  labels still have cutoffs. Erik keeps `errors=0` meaningful ("it's confusing otherwise");
+  accept a standing `GROWN` line instead.
+  **Which labels need it:** primarily *digital* labels grow comps indefinitely; those also
+  pressing CD/LP/cassette rarely do. Weedian (added 2026-09-07 after 37 of its 99 releases had
+  drifted, ~100 tracks) and PRF are the only two.
+  **Multi-album repair batches must be idempotent** —
+  `N:\bandcampfree\weedian-repair-stragglers.ps1` is the reusable shape: skips any album already
+  at its target FLAC count, `-WhatIfOnly` previews. `repair_album` writes nothing until the whole
+  archive is fetched and extracted, so a killed run costs one download and never leaves a partial
+  album. (That batch was reaped twice by memory pressure, not by the tooling.)
 
 **Expect near-total dedup.** Erik's collection already holds most free comps — batches routinely
 report 37/39 or 68/79 already downloaded. Always `--report` first, and check the label directory on
@@ -409,6 +438,10 @@ inside it does — a report advances each label's `newest_release_seen` cutoff a
   duplicated individual volumes already on disk — labels publish both, each with its own
   item id, and the rules legitimately match both. Check the volumes cover the omnibus
   (113 tracks vs 113, 42 vs 42) before moving anything.
+- **`tralbum_details` can list the same track twice** — Weedian's `Trip to Florida` reports 36
+  tracks because `Heavy Load - Possession` appears at #35 and #36; the archive holds it once and
+  the album is complete. A count-based growth check therefore flags it `GROWN` forever. **Verify
+  by TITLE, not track number** — the archive's numbering can also differ from the API's.
 
 **Corpus re-pricing audit** (`N:\bandcampfree\audit-free-download.ps1`, one-off 2026-08-13):
 **`--full-scan` does NOT bypass the state cache.** `freesync.scan_label` short-circuits on
