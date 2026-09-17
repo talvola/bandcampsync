@@ -3,7 +3,7 @@
 from unittest.mock import Mock, patch
 import pytest
 from bandcampsync.sync import Syncer
-from bandcampsync.bandcamp import BandcampError
+from bandcampsync.bandcamp import BandcampError, BandcampNoDigitalDownload
 
 
 @pytest.fixture
@@ -379,3 +379,26 @@ def test_sync_item_zip_name_fallback_skips_download(
 
         assert result is False
         mock_download.assert_not_called()
+
+
+def test_sync_item_physical_only_skips_without_retry(syncer, mock_bandcamp, caplog):
+    item = Mock(
+        is_preorder=False,
+        band_name="Various Artists",
+        item_title="Dressed To Thrill",
+        item_id=1657249189,
+        item_type="package",
+        folder_suffix="",
+        download_url="http://example.com/download",
+    )
+    mock_bandcamp.get_download_file_url.side_effect = BandcampNoDigitalDownload(
+        "Physical purchase with no digital download (Compact Disc (CD))"
+    )
+
+    with patch("bandcampsync.sync.time.sleep") as mock_sleep:
+        result = syncer.sync_item(item)
+
+    assert result is False
+    assert mock_bandcamp.get_download_file_url.call_count == 1
+    mock_sleep.assert_not_called()
+    assert not [r for r in caplog.records if r.levelname == "ERROR"]
