@@ -4,7 +4,7 @@ import time
 from pathlib import Path
 from tempfile import NamedTemporaryFile, TemporaryDirectory
 from .logger import get_logger
-from .bandcamp import Bandcamp, BandcampError
+from .bandcamp import Bandcamp, BandcampError, BandcampNoDigitalDownload
 from .ignores import Ignores
 from .media import LocalMedia
 from .notify import NotifyURL
@@ -247,6 +247,10 @@ class Syncer:
                     else:
                         self.local_media.write_bandcamp_id(item, local_path)
 
+                    log.info(
+                        f'Download complete: "{item.band_name} / {item.item_title}" '
+                        f"(id:{item.item_id})"
+                    )
                     self.new_items_downloaded = True
                     return True
                 finally:
@@ -256,6 +260,12 @@ class Syncer:
                     except OSError:
                         pass
 
+            except BandcampNoDigitalDownload as e:
+                log.info(
+                    f'No digital download, skipping: "{item.band_name} / {item.item_title}" '
+                    f"(id:{item.item_id}): {e}"
+                )
+                return False
             except (
                 BandcampError,
                 DownloadBadStatusCode,

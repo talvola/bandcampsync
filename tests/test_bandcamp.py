@@ -2,7 +2,12 @@ import json
 from pathlib import Path
 
 import pytest
-from bandcampsync.bandcamp import Bandcamp, BandcampItem
+from bandcampsync.bandcamp import (
+    Bandcamp,
+    BandcampError,
+    BandcampItem,
+    BandcampNoDigitalDownload,
+)
 
 
 def _load_payload(name):
@@ -75,3 +80,39 @@ def test_resolve_download_url_physical(bandcamp, physical_payload, physical_item
         physical_payload["redownload_urls"],
     )
     assert download_url is None
+
+
+def _stub_download_page(mocker, bandcamp, digital_item):
+    mocker.patch.object(bandcamp, "_request")
+    mocker.patch.object(
+        bandcamp,
+        "_extract_pagedata_from_soup",
+        return_value={"digital_items": [digital_item]},
+    )
+
+
+# A physical-only package can still be handed a download page; its entry has no
+# "downloads" key and says includes_digital: false. That is not a parse error.
+def test_get_download_file_url_physical_only(mocker, bandcamp):
+    item = BandcampItem({"item_id": 1657249189, "download_url": "http://x/download"})
+    _stub_download_page(
+        mocker,
+        bandcamp,
+        {
+            "item_id": 1657249189,
+            "type": "package",
+            "package_type_name": "Compact Disc (CD)",
+            "includes_digital": False,
+        },
+    )
+    with pytest.raises(BandcampNoDigitalDownload, match="Compact Disc"):
+        bandcamp.get_download_file_url(item)
+
+
+# A missing "downloads" key without that signal is still a parse error.
+def test_get_download_file_url_missing_downloads_is_error(mocker, bandcamp):
+    item = BandcampItem({"item_id": 7, "download_url": "http://x/download"})
+    _stub_download_page(mocker, bandcamp, {"item_id": 7, "type": "album"})
+    with pytest.raises(BandcampError) as exc:
+        bandcamp.get_download_file_url(item)
+    assert not isinstance(exc.value, BandcampNoDigitalDownload)

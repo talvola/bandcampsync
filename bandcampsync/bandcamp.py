@@ -22,6 +22,11 @@ class BandcampDownloadUnavailable(BandcampError):
     pass
 
 
+class BandcampNoDigitalDownload(BandcampDownloadUnavailable):
+    """A physical-only purchase (a CD or record without a download). Permanent, so
+    retrying it is pointless and it is not an error."""
+
+
 class Bandcamp:
     BASE_PROTO = "https"
     BASE_DOMAIN = "bandcamp.com"
@@ -388,6 +393,16 @@ class Bandcamp:
                     '"digital_items[].art_id" key'
                 ) from e
             if digital_item_id == item.item_id:
+                if (
+                    "downloads" not in digital_item
+                    and digital_item.get("includes_digital") is False
+                ):
+                    # Bandcamp sometimes hands out a download page for a physical-only
+                    # purchase: the page lists the package but has no "downloads" key.
+                    raise BandcampNoDigitalDownload(
+                        f"Physical purchase with no digital download "
+                        f"({digital_item.get('package_type_name') or 'package'})"
+                    )
                 try:
                     downloads = digital_item["downloads"]
                 except KeyError as e:
