@@ -186,12 +186,23 @@ class PlexCollection:
         Albums are listed with an ``artist.id`` section filter, not the artist's
         ``/children``: for a just-scanned artist (Moon Circle, still under sonic analysis)
         ``/children`` answered empty while the filter already returned the album.
+
+        Every matching artist is tried - the search is a substring match, so a common
+        name can put the owner anywhere in the list - but exact-name matches go first,
+        which keeps the usual case to a single artist's albums.
         """
+        from .blogsync import _norm
+
         if not artist:
             return None
         section = f"/library/sections/{self.section}/all"
         container = self._get(section, type=8, title=artist)
-        for band in container.get("Metadata", [])[:5]:
+        want = _norm(artist)
+        bands = sorted(
+            container.get("Metadata", []),
+            key=lambda band: _norm(band.get("title", "")) != want,
+        )
+        for band in bands:
             albums = self._get(section, type=9, **{"artist.id": band["ratingKey"]})
             for entry in albums.get("Metadata", []):
                 if (

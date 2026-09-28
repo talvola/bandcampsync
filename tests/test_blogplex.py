@@ -53,6 +53,29 @@ def test_retagged_title_falls_back_to_the_artist_and_matches_by_path():
     )
 
 
+def test_artist_fallback_checks_every_artist_the_search_returns():
+    # A substring search on a common name returns many artists; the owner can be
+    # anywhere in the list, so none may be dropped. The exact name is tried first.
+    others = [{"ratingKey": str(n), "title": f"Buffalo {n}"} for n in range(1, 7)]
+    responses = {
+        (ALBUMS, (("title", "Buffalo"), ("type", 8))): {
+            "Metadata": others + [{"ratingKey": "99", "title": "Buffalo"}]
+        },
+        (ALBUMS, (("artist.id", "99"), ("type", 9))): {
+            "Metadata": [{"ratingKey": "990"}]
+        },
+    }
+    plex = CannedPlex(responses, dirs={"990": PLEX_DIR})
+    plex.requested = []
+    get = plex._get
+    plex._get = lambda path, **params: (
+        plex.requested.append(params) or get(path, **params)
+    )
+    assert plex.find_album("Buffalo", "Retagged", LOCAL_DIR) == "990"
+    # The exact-name artist was listed first, so no namesake's albums were fetched.
+    assert [p.get("artist.id") for p in plex.requested if "artist.id" in p] == ["99"]
+
+
 def test_artist_fallback_never_guesses_without_a_path_match():
     plex = CannedPlex(
         {
