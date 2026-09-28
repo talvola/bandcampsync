@@ -67,7 +67,9 @@ def load_plex_env(env_path=None):
 
 
 class PlexCollection:
-    def __init__(self, collection_id, env_path=None, section=DEFAULT_SECTION, timeout=60):
+    def __init__(
+        self, collection_id, env_path=None, section=DEFAULT_SECTION, timeout=60
+    ):
         self.base, self._token = load_plex_env(env_path)
         self.collection_id = int(collection_id)
         self.section = section
@@ -151,31 +153,80 @@ class PlexCollection:
           1. the candidate's files are in the directory we downloaded to - decisive
           2. artist and title both agree exactly
           3. a single candidate whose title contains ours, or vice versa
+          4. failing all that, the artist's albums, by path agreement only
 
         Returns None when the search finds nothing, which is NOT always "not scanned yet":
         a standalone track has no album row at all, so it can never resolve here (and could
         not join an album-subtype collection even if it did).
         """
-        from .blogsync import _norm
-
+        wanted_dir = self.local_to_plex_path(local_path)
         try:
             container = self._get(
                 f"/library/sections/{self.section}/all", type=9, title=title
             )
+            found = self._match_candidates(
+                container.get("Metadata", []), artist, title, wanted_dir
+            )
+            if found is None and wanted_dir:
+                found = self._find_by_artist_path(artist, wanted_dir)
         except requests.RequestException as e:
             log.warning(f"Plex search failed for {artist} / {title}: {e}")
             return None
-        candidates = container.get("Metadata", [])
+        return found
+
+    def _find_by_artist_path(self, artist, wanted_dir):
+        """Search by artist and accept only an album whose files sit in ``wanted_dir``.
+
+        The title search is a substring match, so a retag that shortens or re-punctuates
+        the title returns nothing at all and step 1 never runs. October 2026 lost two that
+        way: "CADAVER DE CABRA S/t" tagged "Cadáver de Cabra", and "You're On The Moon"
+        with a curly apostrophe. Plex's artist search is accent- and case-insensitive, and
+        since this only ever accepts a path match, a broad candidate list cannot mislead it.
+
+        Albums are listed with an ``artist.id`` section filter, not the artist's
+        ``/children``: for a just-scanned artist (Moon Circle, still under sonic analysis)
+        ``/children`` answered empty while the filter already returned the album.
+
+        Every matching artist is tried - the search is a substring match, so a common
+        name can put the owner anywhere in the list - but exact-name matches go first,
+        which keeps the usual case to a single artist's albums.
+        """
+        from .blogsync import _norm
+
+        if not artist:
+            return None
+        section = f"/library/sections/{self.section}/all"
+        container = self._get(section, type=8, title=artist)
+        want = _norm(artist)
+        bands = sorted(
+            container.get("Metadata", []),
+            key=lambda band: _norm(band.get("title", "")) != want,
+        )
+        for band in bands:
+            albums = self._get(section, type=9, **{"artist.id": band["ratingKey"]})
+            for entry in albums.get("Metadata", []):
+                if (
+                    self.album_dir(entry["ratingKey"]).casefold()
+                    == wanted_dir.casefold()
+                ):
+                    return entry["ratingKey"]
+        return None
+
+    def _match_candidates(self, candidates, artist, title, wanted_dir):
+        from .blogsync import _norm
+
         if not candidates:
             return None
 
         # 1. Path agreement. Costs one request per candidate, but only ever runs for the
         # handful a title search returned, and it is the only check that cannot be fooled
         # by a retagged compilation.
-        wanted_dir = self.local_to_plex_path(local_path)
         if wanted_dir:
             for entry in candidates:
-                if self.album_dir(entry["ratingKey"]).casefold() == wanted_dir.casefold():
+                if (
+                    self.album_dir(entry["ratingKey"]).casefold()
+                    == wanted_dir.casefold()
+                ):
                     return entry["ratingKey"]
 
         want_artist, want_title = _norm(artist), _norm(title)
@@ -235,7 +286,11 @@ def drain_pending(state, collection, apply=False):
     for item_id, entry in sorted(state.pending.items()):
         if entry.get("item_type") in ("t", "track"):
             unaddable.append(
-                (item_id, entry, "standalone track - an album collection cannot hold it")
+                (
+                    item_id,
+                    entry,
+                    "standalone track - an album collection cannot hold it",
+                )
             )
             continue
         rating_key = collection.find_album(

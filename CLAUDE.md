@@ -554,6 +554,13 @@ the directory we downloaded to** (decisive, and immune to retagging - hence
 `LOCAL_MEDIA_ROOT`/`PLEX_MEDIA_ROOT`, since `N:` and `/share/Music` are the same files),
 then exact artist+title, then a *unique* candidate whose title contains ours or vice
 versa. Requiring uniqueness in that last step is what keeps it safe.
+**All of that only sees what the TITLE search returns**, and that search is a substring
+match, so a retag that shortens or re-punctuates the title yields zero candidates and the
+path check never runs. October 2026 lost two that way (`CADAVER DE CABRA S/t` tagged
+`Cadáver de Cabra`; `You're On The Moon` with a curly `’`). The fallback searches by artist
+(accent- and case-insensitive) and accepts **only a path match** from that wider list. It
+lists albums with the `artist.id` section filter, NOT the artist's `/children`, which
+answered empty for a just-scanned artist while the filter already returned the album.
 
 **A standalone track can never join this collection.** Collection 472199 is
 `subtype=album`, and a `track`-type release has no album row in Plex at all - a title
