@@ -14,6 +14,64 @@ def test_local_path_outside_the_media_root_is_not_rewritten():
     assert PlexCollection.local_to_plex_path("") == ""
 
 
+class CannedPlex(PlexCollection):
+    """The real find_album over canned API responses: {(path, frozen params): container}."""
+
+    def __init__(self, responses, dirs):
+        self.section = 1
+        self.responses = responses
+        self.dirs = dirs
+
+    def _get(self, path, **params):
+        return self.responses.get((path, tuple(sorted(params.items()))), {})
+
+    def album_dir(self, rating_key):
+        return self.dirs.get(rating_key, "")
+
+
+ALBUMS = "/library/sections/1/all"
+PLEX_DIR = "/share/Music/Bandcamp (FLAC)/CADAVER DE CABRA - CADAVER DE CABRA S-t"
+LOCAL_DIR = r"N:\Bandcamp (FLAC)\CADAVER DE CABRA - CADAVER DE CABRA S-t"
+
+
+def test_retagged_title_falls_back_to_the_artist_and_matches_by_path():
+    # The title search finds nothing: Plex retagged "CADAVER DE CABRA S/t" to
+    # "Cadáver de Cabra", which the query is not a substring of.
+    plex = CannedPlex(
+        {
+            (ALBUMS, (("title", "CADAVER DE CABRA"), ("type", 8))): {
+                "Metadata": [{"ratingKey": "31", "title": "Cadáver de Cabra"}]
+            },
+            (ALBUMS, (("artist.id", "31"), ("type", 9))): {
+                "Metadata": [{"ratingKey": "30"}, {"ratingKey": "32"}]
+            },
+        },
+        dirs={"30": "/share/Music/elsewhere", "32": PLEX_DIR},
+    )
+    assert (
+        plex.find_album("CADAVER DE CABRA", "CADAVER DE CABRA S/t", LOCAL_DIR) == "32"
+    )
+
+
+def test_artist_fallback_never_guesses_without_a_path_match():
+    plex = CannedPlex(
+        {
+            (ALBUMS, (("title", "CADAVER DE CABRA"), ("type", 8))): {
+                "Metadata": [{"ratingKey": "31"}]
+            },
+            (ALBUMS, (("artist.id", "31"), ("type", 9))): {
+                "Metadata": [{"ratingKey": "30"}]
+            },
+        },
+        dirs={"30": "/share/Music/elsewhere"},
+    )
+    assert (
+        plex.find_album("CADAVER DE CABRA", "CADAVER DE CABRA S/t", LOCAL_DIR) is None
+    )
+    # And with no local path there is nothing decisive to check, so no fallback at all.
+    assert plex.find_album("CADAVER DE CABRA", "CADAVER DE CABRA S/t") is None
+
+
 class FakePlex:
     """Stands in for PlexCollection: canned search results and a recording add()."""
 
