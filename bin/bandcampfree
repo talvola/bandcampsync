@@ -83,17 +83,17 @@ if __name__ == '__main__':
     if not args.config:
         raise ValueError('A configuration file is required (--config/-C)')
 
-    config_path = Path(args.config).resolve()
+    config_path = Path(args.config).absolute()
     config = load_config(config_path)
 
     if args.directory:
-        config.media_dir = Path(args.directory).resolve()
+        config.media_dir = Path(args.directory).absolute()
     if not config.media_dir:
         raise ValueError('No media directory set, use --directory or defaults.media_dir')
     if not config.media_dir.is_dir():
         raise ValueError(f'Media directory does not exist: {config.media_dir}')
 
-    state_path = Path(args.state).resolve() if args.state else \
+    state_path = Path(args.state).absolute() if args.state else \
         config_path.parent / 'bandcampfree-state.json'
 
     log.info(f'BandcampSync (free) v{version} starting')
@@ -118,7 +118,7 @@ if __name__ == '__main__':
         # missing, so it needs --temp-dir every bit as much as a normal download does.
         repair_temp = None
         if args.temp_dir:
-            repair_temp = Path(args.temp_dir).resolve()
+            repair_temp = Path(args.temp_dir).absolute()
             if not repair_temp.is_dir():
                 raise ValueError(f'Temporary directory does not exist: {repair_temp}')
         do_repair(
@@ -145,7 +145,7 @@ if __name__ == '__main__':
 
     temp_dir = None
     if args.temp_dir:
-        temp_dir = Path(args.temp_dir).resolve()
+        temp_dir = Path(args.temp_dir).absolute()
         if not temp_dir.is_dir():
             raise ValueError(f'Temporary directory does not exist: {temp_dir}')
 
