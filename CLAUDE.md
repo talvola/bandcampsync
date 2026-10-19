@@ -186,6 +186,23 @@ handles it; the free sweep never hit this because none of its paths contain spac
 Stale cookies are the expected failure mode — the script greps the tail for
 `cookies|identity|authenticat` and says so in the log.
 
+## Running Away From Home (SSHFS mount as `L:`)
+
+When N: is unreachable, the same Music share can be mounted over SFTP with SSHFS-Win. Erik's real host, port and user are in the project memory `travel-l-drive-sshfs.md`, not here, because this repo is public:
+
+```
+"C:\Program Files\SSHFS-Win\bin\sshfs-win.exe" cmd -p <port> <user>@<host>:Music L: -o umask=000,create_umask=000,uid=-1,gid=-1
+```
+
+- **Mount it from a NON-elevated terminal.** A drive mapped from an admin terminal does not exist for normal processes, so the tools see no `L:` even though `sshfs` is running.
+- **Keep the umask options.** Without them, folders created through the mount are read-only to you, and every download fails on its first album.
+- **Point every path flag at `L:`.** For `bandcampfree` that is config, state, client secret and token, plus `-d "L:/Bandcamp (FLAC)"`.
+- **Stage on C: with `-t`, not on `L:`.** A temp dir on `L:` sends the zip up to the NAS and back down again before extraction.
+- **The collision guard reads `media_dir` from `labels.yaml`, which points at `N:`.** Over `L:` it finds nothing and silently passes everything. Run a copy with the media path set to `L:`.
+- **A full collection sync is impractical over the mount**: the media index alone takes about an hour. For a known purchase, filter `load_purchases` to that item and pass `--skip-item-index`.
+- **Expect the mount to drop.** It dropped once overnight. Check `Test-Path L:\` before a long run; the scan saves after every label, so a rerun resumes.
+- **The scheduled tasks still look for `N:`** and skip while you are away.
+
 ## Free / Pay-What-You-Want Label Downloader (`bandcampfree`)
 
 A second, independent tool that watches record label pages for free albums. It cannot reuse

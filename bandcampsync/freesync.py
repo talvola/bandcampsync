@@ -173,18 +173,21 @@ class FreeState:
     def save(self):
         self.path.parent.mkdir(parents=True, exist_ok=True)
         tmp = self.path.with_suffix(self.path.suffix + ".tmp")
+        # Serialise in memory and write once: json.dump issues thousands of
+        # small writes, each a round trip over an SSHFS mount (~30 s per save).
         with open(tmp, "wt", encoding="utf-8") as f:
-            json.dump(
-                {
-                    "labels": self.labels,
-                    "items": {str(k): v for k, v in self.items.items()},
-                    "pending": {str(k): v for k, v in self.pending.items()},
-                    "skipped": {str(k): v for k, v in self.skipped.items()},
-                    "failures": {str(k): v for k, v in self.failures.items()},
-                },
-                f,
-                indent=1,
-                sort_keys=True,
+            f.write(
+                json.dumps(
+                    {
+                        "labels": self.labels,
+                        "items": {str(k): v for k, v in self.items.items()},
+                        "pending": {str(k): v for k, v in self.pending.items()},
+                        "skipped": {str(k): v for k, v in self.skipped.items()},
+                        "failures": {str(k): v for k, v in self.failures.items()},
+                    },
+                    indent=1,
+                    sort_keys=True,
+                )
             )
         tmp.replace(self.path)
         log.info(f"Wrote state to {self.path}")

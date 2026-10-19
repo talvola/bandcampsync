@@ -55,9 +55,9 @@ if __name__ == '__main__':
     if args.version:
         print(f'BandcampSync version: {version}', file=sys.stdout)
         sys.exit(0)
-    cookies_path = Path(args.cookies).resolve()
-    ign_file_path = Path(args.ignore_file).resolve() if args.ignore_file else None
-    dir_path = Path(args.directory).resolve()
+    cookies_path = Path(args.cookies).absolute()
+    ign_file_path = Path(args.ignore_file).absolute() if args.ignore_file else None
+    dir_path = Path(args.directory).absolute()
     ign_patterns = args.ignore
     media_format = args.format
     skip_item_index = args.skip_item_index
@@ -77,7 +77,7 @@ if __name__ == '__main__':
         patterns = args.ignore
         log.warning(f'BandcampSync is bypassing: {patterns}')
     if args.temp_dir:
-        temp_dir = Path(args.temp_dir).resolve()
+        temp_dir = Path(args.temp_dir).absolute()
         if not temp_dir.is_dir():
             raise ValueError(f'Temporary directory does not exist: {temp_dir}')
     else:
@@ -97,7 +97,7 @@ if __name__ == '__main__':
         cookies = f.read().strip()
     log.info(f'Loaded cookies from "{cookies_path}"')
     if args.report or args.report_csv or args.check_growth:
-        csv_path = Path(args.report_csv).resolve() if args.report_csv else None
+        csv_path = Path(args.report_csv).absolute() if args.report_csv else None
         generate_report(
             cookies,
             dir_path,

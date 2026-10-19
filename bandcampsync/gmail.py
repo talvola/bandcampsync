@@ -93,11 +93,16 @@ def load_credentials(client_secret_path, token_path):
 
 def _save_token(token_path, creds):
     token_path.parent.mkdir(parents=True, exist_ok=True)
-    token_path.write_text(creds.to_json(), encoding="utf-8")
+    # Write-then-replace, like FreeState.save: over an SSHFS mount an existing
+    # file owned by the NAS user cannot be reopened for writing, but a new one
+    # can be created and swapped in.
+    tmp = token_path.with_suffix(token_path.suffix + ".tmp")
+    tmp.write_text(creds.to_json(), encoding="utf-8")
     try:  # best effort on Windows, which ignores POSIX modes
-        token_path.chmod(0o600)
+        tmp.chmod(0o600)
     except OSError:
         pass
+    tmp.replace(token_path)
     log.info(f"Stored Gmail token at {token_path}")
 
 
