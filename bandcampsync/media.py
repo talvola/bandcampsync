@@ -21,13 +21,19 @@ def clean_path_component(path_str):
     added 2026-08-06 after Flowerpot Records' "12|21" failed with WinError 123 - it was
     the only failure in a 207-album run, and clean_label_dir_name had been stripping
     these all along via _WINDOWS_ILLEGAL_PATH_CHARS.
+
+    Control characters (U+0000-U+001F) are the same case and become spaces, so the
+    trailing strip below also catches them. Added 2026-10-19 after ReplacedByRobots'
+    "Whiskey, BOURBON, GIN or RYE…" - its title ends in a newline - failed every attempt.
     """
     path_str = str(path_str)
     disallowed_punctuation = "\"#%'*/?\\`:|<>"
     normalized_path = normalize("NFKD", path_str)
     outstr = ""
     for c in normalized_path:
-        if c not in disallowed_punctuation:
+        if ord(c) < 0x20:
+            outstr += " "
+        elif c not in disallowed_punctuation:
             outstr += c
     # Windows silently strips trailing dots and spaces from directory names
     return outstr.rstrip(". ")

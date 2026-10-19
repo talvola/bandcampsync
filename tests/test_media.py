@@ -383,6 +383,21 @@ def test_clean_path_component_strips_windows_illegal_characters():
         assert char not in clean_path_component(f"a{char}b")
 
 
+def test_clean_path_component_strips_control_characters():
+    """A title ending in "…\\n" made an unwritable path: NFKD turns the ellipsis into
+    dots, but the newline after them blocked the trailing-dot strip and Windows rejects
+    the newline itself with WinError 123."""
+    from bandcampsync.media import clean_path_component
+
+    assert (
+        clean_path_component("ReplacedByRobots - Whiskey, BOURBON, GIN or RYE…\n")
+        == "ReplacedByRobots - Whiskey, BOURBON, GIN or RYE"
+    )
+    assert clean_path_component("Line one\nLine two") == "Line one Line two"
+    for code in range(0x20):
+        assert chr(code) not in clean_path_component(f"a{chr(code)}b")
+
+
 def test_clean_path_component_covers_every_windows_illegal_character():
     """clean_path_component must strip at least what clean_label_dir_name does, or the
     album directory is unwritable inside a label directory that was fine."""
