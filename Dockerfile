@@ -26,6 +26,8 @@ RUN set -x && \
     python3 \
     python3-dev \
     python3-pip && \
+  # Fail the build if the store pip is about to use still trusts the root
+  python3 -c "import ssl,sys; f='/etc/ssl/certs/ca-certificates.crt'; bad=[c for c in ssl.create_default_context(cafile=f).get_ca_certs() if 'emSign ECC Root CA - G3' in str(c['subject'])]; sys.exit(f + ' still trusts emSign ECC Root CA - G3' if bad else 0)" && \
   # Create a 'app' user which the service will run as
   groupadd app && \
   useradd -M -d /app -s /bin/false -g app app && \
