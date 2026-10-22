@@ -17,13 +17,17 @@ RUN set -x && \
   apt-get -y --no-install-recommends install locales && \
   echo "en_US.UTF-8 UTF-8" > /etc/locale.gen && \
   locale-gen en_US.UTF-8 && \
-  # Install required distro packages
+  # Install required distro packages. Debian's pip uses the system CA store, so
+  # ca-certificates must be the Oct 2026 update (drops emSign ECC Root CA - G3)
   apt-get -y --no-install-recommends install \
+    ca-certificates \
     git \
     gosu \
     python3 \
     python3-dev \
     python3-pip && \
+  # Fail the build if the store pip is about to use still trusts the root
+  python3 -c "import ssl,sys; f='/etc/ssl/certs/ca-certificates.crt'; bad=[c for c in ssl.create_default_context(cafile=f).get_ca_certs() if 'emSign ECC Root CA - G3' in str(c['subject'])]; sys.exit(f + ' still trusts emSign ECC Root CA - G3' if bad else 0)" && \
   # Create a 'app' user which the service will run as
   groupadd app && \
   useradd -M -d /app -s /bin/false -g app app && \
