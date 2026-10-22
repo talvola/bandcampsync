@@ -17,8 +17,10 @@ RUN set -x && \
   apt-get -y --no-install-recommends install locales && \
   echo "en_US.UTF-8 UTF-8" > /etc/locale.gen && \
   locale-gen en_US.UTF-8 && \
-  # Install required distro packages
+  # Install required distro packages. Debian's pip uses the system CA store, so
+  # ca-certificates must be the Oct 2026 update (drops emSign ECC Root CA - G3)
   apt-get -y --no-install-recommends install \
+    ca-certificates \
     git \
     gosu \
     python3 \
