@@ -591,7 +591,14 @@ addable - and only the queue distinguishes them.
 
 ## Key Details
 
-- Python 3.10+ required (`.python-version` specifies 3.10)
+- Python 3.10+ supported (CI tests 3.10); `.python-version` pins the local venv to **3.13**, a
+  system install at `C:\Program Files\Python313`. On 2026-10-29 both scheduled jobs died with
+  `exit 103 … No Python at '…\uv\python\cpython-3.10.19…'` after old Pythons were removed — the
+  venv points at a specific interpreter, so **removing a Python version breaks every scheduled
+  run** until `.python-version` is bumped and the venv rebuilt.
+- **Rebuild with `uv sync --extra gmail`, never bare `uv sync`** — the free sweep and
+  `bandcampblog` need the gmail extra (it also brings `requests`, which `blogplex` imports), and a
+  bare sync removes it.
 - Only two runtime dependencies: `beautifulsoup4` and `curl-cffi`
 - `Syncer.__init__` performs all work (sync + notify) — it's not a two-step init-then-run pattern
 - Concurrency uses `asyncio.run()` with `run_in_executor` for blocking I/O
