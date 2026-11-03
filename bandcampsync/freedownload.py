@@ -32,6 +32,22 @@ from .media import clean_label_dir_name, clean_path_component, parse_zip_filenam
 
 log = get_logger("freedownload")
 
+# Files that count as tracks when deciding whether a repair is a pure append.
+AUDIO_SUFFIXES = {
+    ".flac",
+    ".mp3",
+    ".m4a",
+    ".aac",
+    ".ogg",
+    ".oga",
+    ".opus",
+    ".wav",
+    ".aif",
+    ".aiff",
+    ".alac",
+    ".wma",
+}
+
 ITEM_INDEX_FILENAME = "bandcamp_item_id.txt"
 
 
@@ -296,7 +312,11 @@ def _track_keys(names):
     }
 
 
-def extract_missing(zip_path, local_path, max_additions=None):
+class RepairRefused(AcquireError):
+    """A repair that would do more than append tracks. Nothing was written."""
+
+
+def extract_missing(zip_path, local_path, max_additions=None, append_only=False):
     """Extract only entries that are not already present locally.
 
     Used to repair a directory that is complete apart from tracks the label added after
@@ -304,9 +324,18 @@ def extract_missing(zip_path, local_path, max_additions=None):
     compilation (has_digital_download is false on them), so the whole archive must be
     fetched even to recover one file - but there is no reason to rewrite the rest.
 
+    Never deletes, and never overwrites: a missing-by-key entry whose filename already
+    exists locally is skipped rather than written over.
+
     max_additions guards against a silent duplicate explosion: if far more files look
     missing than expected, the naming has drifted in a way this cannot reconcile and it
     is safer to stop than to double the directory.
+
+    append_only is the unattended (auto_repair) mode: it additionally refuses when any
+    local audio file is absent from the archive. That is a label that removed, renamed or
+    re-sequenced tracks rather than adding them, and adding alongside would leave two
+    files per track number - a judgement call for a human (see `--repair`), not a sweep.
+    Both refusals raise RepairRefused before anything is written.
     """
     local_path = Path(local_path)
     existing_names = [p.name for p in local_path.iterdir() if p.is_file()]
@@ -314,12 +343,30 @@ def extract_missing(zip_path, local_path, max_additions=None):
         entries = [i for i in zf.infolist() if not i.is_dir() and Path(i.filename).name]
         entry_names = [Path(i.filename).name for i in entries]
 
-        local_keys = set(_track_keys(existing_names))
+        local_map = _track_keys(existing_names)
+        local_keys = set(local_map)
         entry_keys = _track_keys(entry_names)
         missing = {k: n for k, n in entry_keys.items() if k not in local_keys}
 
+        if append_only:
+            entry_name_set = set(entry_names)
+            orphans = sorted(
+                name
+                for key, name in local_map.items()
+                if Path(name).suffix.lower() in AUDIO_SUFFIXES
+                and key not in entry_keys
+                and name not in entry_name_set
+            )
+            if orphans:
+                raise RepairRefused(
+                    f"{len(orphans)} local track(s) are not in the current archive "
+                    f"(removed, renamed or renumbered by the label), e.g. "
+                    f"{orphans[0]!r}. Not an append; left untouched for a manual "
+                    f"--repair."
+                )
+
         if max_additions is not None and len(missing) > max_additions:
-            raise AcquireError(
+            raise RepairRefused(
                 f"Repair would add {len(missing)} files but only {max_additions} were "
                 f"expected to be missing. The local filenames probably no longer match "
                 f"the archive (the label may have renamed the album). Refusing to "
@@ -329,8 +376,12 @@ def extract_missing(zip_path, local_path, max_additions=None):
         added = []
         by_name = {Path(i.filename).name: i for i in entries}
         for _key, name in sorted(missing.items()):
+            target = local_path / name
+            if target.exists():
+                log.warning(f"Repair: {name!r} already exists locally; not overwriting")
+                continue
             info = by_name[name]
-            with zf.open(info) as src, open(local_path / name, "wb") as dst:
+            with zf.open(info) as src, open(target, "xb") as dst:
                 shutil.copyfileobj(src, dst)
             added.append(name)
 
@@ -341,8 +392,20 @@ def extract_missing(zip_path, local_path, max_additions=None):
     return added
 
 
-def repair_album(album, spec, config, local_path, gmail_reader=None, temp_dir=None):
+def repair_album(
+    album,
+    spec,
+    config,
+    local_path,
+    gmail_reader=None,
+    temp_dir=None,
+    append_only=False,
+    stats=None,
+):
     """Fetch an album's archive and add only the files missing from local_path.
+
+    append_only and the never-overwrite rule are described on extract_missing. stats, if
+    given, receives "bytes": the archive size, for --max-gb accounting.
 
     gmail_reader may be a GmailReader or a zero-argument callable returning one, matching
     acquire_album. Whether a link arrives by email is decided by /email_download at request
@@ -378,8 +441,12 @@ def repair_album(album, spec, config, local_path, gmail_reader=None, temp_dir=No
         tmp_file = Path(td) / "download.bin"
         with open(tmp_file, "wb") as fh:
             content_filename = download_file(file_url, fh)
-        size_mb = tmp_file.stat().st_size / (1024 * 1024)
-        log.info(f"Downloaded {content_filename!r} ({size_mb:.1f} MB) for repair")
+        size = tmp_file.stat().st_size
+        if stats is not None:
+            stats["bytes"] = size
+        log.info(
+            f"Downloaded {content_filename!r} ({size / (1024 * 1024):.1f} MB) for repair"
+        )
         if not is_zip_file(tmp_file):
             raise AcquireError(f"Repair download for {album.title!r} is not a zip")
         expected = max(
@@ -390,7 +457,9 @@ def repair_album(album, spec, config, local_path, gmail_reader=None, temp_dir=No
             ),
         )
         # Allow a small margin for artwork and similar non-track files.
-        added = extract_missing(tmp_file, local_path, max_additions=expected + 5)
+        added = extract_missing(
+            tmp_file, local_path, max_additions=expected + 5, append_only=append_only
+        )
 
     _write_id_file(local_path, album.item_id, overwrite=False)
     return added

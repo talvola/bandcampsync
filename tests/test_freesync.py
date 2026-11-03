@@ -1383,3 +1383,327 @@ def test_resolve_and_download_reports_the_transferred_size(tmp_path, monkeypatch
     )
 
     assert stats["bytes"] == len(payload)
+
+
+# --- auto_repair: append-only top-ups of grown albums ---
+
+
+def test_extract_missing_never_overwrites_an_existing_file(tmp_path):
+    """A one-track directory has no shared prefix to strip while the archive does, so the
+    keys disagree and the existing track looks 'missing'. It must not be written over."""
+    import zipfile
+
+    from bandcampsync.freedownload import extract_missing
+
+    local = tmp_path / "album"
+    local.mkdir()
+    (local / "Comp - 01 One.flac").write_text("original")
+    archive = tmp_path / "album.zip"
+    with zipfile.ZipFile(archive, "w") as zf:
+        zf.writestr("Comp - 01 One.flac", "REPLACED")
+        zf.writestr("Comp - 02 Two.flac", "new")
+
+    added = extract_missing(archive, local)
+
+    assert added == ["Comp - 02 Two.flac"]
+    assert (local / "Comp - 01 One.flac").read_text() == "original"
+
+
+def test_extract_missing_append_only_refuses_when_a_local_track_is_gone(tmp_path):
+    import zipfile
+
+    import pytest
+
+    from bandcampsync.freedownload import RepairRefused, extract_missing
+
+    local = tmp_path / "album"
+    local.mkdir()
+    (local / "X - 01 Kept.flac").write_text("a")
+    (local / "X - 02 Dropped.flac").write_text("b")
+    archive = tmp_path / "album.zip"
+    with zipfile.ZipFile(archive, "w") as zf:
+        zf.writestr("X - 01 Kept.flac", "a")
+        zf.writestr("X - 02 Replacement.flac", "c")
+        zf.writestr("X - 03 New.flac", "d")
+
+    with pytest.raises(RepairRefused, match="not in the current archive"):
+        extract_missing(archive, local, append_only=True)
+    # Nothing written, nothing removed.
+    assert sorted(p.name for p in local.iterdir()) == [
+        "X - 01 Kept.flac",
+        "X - 02 Dropped.flac",
+    ]
+
+
+def test_extract_missing_append_only_allows_a_pure_append(tmp_path):
+    import zipfile
+
+    from bandcampsync.freedownload import extract_missing
+
+    local = tmp_path / "album"
+    local.mkdir()
+    (local / "A - Comp - 01 One.flac").write_text("a")
+    (local / "cover.png").write_text("art")
+    (local / "bandcamp_item_id.txt").write_text("5")
+    archive = tmp_path / "album.zip"
+    with zipfile.ZipFile(archive, "w") as zf:
+        zf.writestr("A - Comp - 01 One.flac", "a")
+        zf.writestr("B - Comp - 02 Two.flac", "b")
+        zf.writestr("cover.png", "art")
+
+    assert extract_missing(archive, local, append_only=True) == [
+        "B - Comp - 02 Two.flac"
+    ]
+
+
+def test_auto_repair_requires_watch_growth():
+    import pytest
+
+    from bandcampsync.labelconfig import ConfigError, _validate_match
+
+    with pytest.raises(ConfigError, match="without watch_growth"):
+        _validate_match({"auto_repair": True}, "L")
+    assert _validate_match({"auto_repair": True, "watch_growth": True}, "L")
+
+
+def _growth_scan(tmp_path, monkeypatch, match, have=1, num_tracks=18, state=None):
+    """Scan one label holding one downloaded album with `have` of `num_tracks` tracks."""
+    from bandcampsync import freesync
+    from bandcampsync.labels import DiscoEntry
+
+    album_dir = tmp_path / "L" / "L - October"
+    album_dir.mkdir(parents=True, exist_ok=True)
+    (album_dir / "bandcamp_item_id.txt").write_text("7\n")
+    for f in album_dir.glob("*.flac"):
+        f.unlink()
+    for i in range(have):
+        (album_dir / f"{i:02d}.flac").write_text("x")
+
+    state = state or freesync.FreeState(tmp_path / "s.json")
+    entry = DiscoEntry(item_id=7, item_type="a", title="October", artist="L")
+    monkeypatch.setattr(freesync, "list_discography", lambda api, band_id: [entry])
+    monkeypatch.setattr(
+        freesync,
+        "album_from_details",
+        lambda details, label_name="": _album(
+            item_id=7, title="October", artist="L", num_tracks=num_tracks
+        ),
+    )
+
+    class _API:
+        def tralbum_details(self, *a, **k):
+            return {}
+
+    spec = LabelSpec(name="L", url="https://l.bandcamp.com/", band_id=1, match=match)
+    results, _i, _m = freesync.scan_label(_API(), spec, state, tmp_path)
+    return state, results[0]
+
+
+def test_grown_on_auto_repair_label_is_queued(tmp_path, monkeypatch):
+    from bandcampsync import freesync
+
+    state, (_a, status, _d) = _growth_scan(
+        tmp_path, monkeypatch, {"watch_growth": True, "auto_repair": True}
+    )
+    assert status == freesync.STATUS_REPAIRING
+    assert state.repairs == {7: "L"}
+    assert state.grown == {}
+
+
+def test_grown_without_auto_repair_needs_attention(tmp_path, monkeypatch):
+    from bandcampsync import freesync
+
+    state, (_a, status, _d) = _growth_scan(
+        tmp_path, monkeypatch, {"watch_growth": True}
+    )
+    assert status == freesync.STATUS_GROWN
+    assert state.repairs == {}
+    assert state.grown[7]["have"] == 1 and state.grown[7]["num_tracks"] == 18
+
+
+def test_held_album_stays_held_until_track_count_changes(tmp_path, monkeypatch):
+    from bandcampsync import freesync
+
+    state = freesync.FreeState(tmp_path / "s.json")
+    state.repair_held[7] = {"label": "L", "num_tracks": 18, "reason": "refused"}
+    match = {"watch_growth": True, "auto_repair": True}
+
+    state, (_a, status, detail) = _growth_scan(
+        tmp_path, monkeypatch, match, state=state
+    )
+    assert status == freesync.STATUS_HELD
+    assert "refused" in detail
+    assert state.repairs == {}
+
+    state, (_a, status, _d) = _growth_scan(
+        tmp_path, monkeypatch, match, num_tracks=19, state=state
+    )
+    assert status == freesync.STATUS_REPAIRING
+    assert 7 not in state.repair_held
+
+
+def test_complete_album_clears_growth_bookkeeping(tmp_path, monkeypatch):
+    from bandcampsync import freesync
+
+    state = freesync.FreeState(tmp_path / "s.json")
+    state.grown[7] = {"label": "L"}
+    state.repair_held[7] = {"label": "L", "num_tracks": 3}
+    state, (_a, status, _d) = _growth_scan(
+        tmp_path, monkeypatch, {"watch_growth": True}, have=18, state=state
+    )
+    assert status == freesync.STATUS_DOWNLOADED
+    assert state.grown == {} and state.repair_held == {}
+
+
+def _repair_env(tmp_path, have=1, num_tracks=3):
+    from bandcampsync import freesync
+    from bandcampsync.labelconfig import FreeConfig
+
+    media = tmp_path / "media"
+    album_dir = media / "L" / "L - October"
+    album_dir.mkdir(parents=True)
+    (album_dir / "bandcamp_item_id.txt").write_text("7\n")
+    for i in range(have):
+        (album_dir / f"{i:02d}.flac").write_text("x")
+    state = freesync.FreeState(tmp_path / "s.json")
+    state.repairs[7] = "L"
+    state.items[7] = {"title": "October", "num_tracks": num_tracks, "is_free": True}
+    config = FreeConfig(
+        labels=[
+            LabelSpec(
+                name="L",
+                url="https://l.bandcamp.com/",
+                match={"watch_growth": True, "auto_repair": True},
+            )
+        ],
+        media_dir=media,
+    )
+    return config, state, album_dir
+
+
+def test_drain_repairs_appends_and_records(tmp_path, monkeypatch):
+    from bandcampsync import freesync
+
+    config, state, _album_dir = _repair_env(tmp_path)
+
+    def fake_repair(
+        album, spec, cfg, path, gmail, temp_dir=None, append_only=False, stats=None
+    ):
+        assert append_only, "the sweep must only ever append"
+        for i in (1, 2):
+            (path / f"{i:02d}.flac").write_text("new")
+        stats["bytes"] = 100
+        return ["01.flac", "02.flac"]
+
+    monkeypatch.setattr("bandcampsync.freedownload.repair_album", fake_repair)
+    results, spent = freesync.drain_repairs(config, state, None)
+
+    assert spent == 100
+    assert results[0][1] == ["01.flac", "02.flac"]
+    assert state.repairs == {} and state.repair_held == {}
+    assert state.events[-1]["kind"] == "repaired"
+
+
+def test_drain_repairs_holds_a_refused_repair(tmp_path, monkeypatch):
+    from bandcampsync import freesync
+    from bandcampsync.freedownload import RepairRefused
+
+    config, state, album_dir = _repair_env(tmp_path)
+
+    def refuse(*a, **k):
+        raise RepairRefused("2 local track(s) are not in the current archive")
+
+    monkeypatch.setattr("bandcampsync.freedownload.repair_album", refuse)
+    freesync.drain_repairs(config, state, None)
+
+    assert state.repairs == {}
+    assert state.repair_held[7]["num_tracks"] == 3
+    assert "not in the current archive" in state.repair_held[7]["reason"]
+    assert state.events[-1]["kind"] == "held"
+    assert len(list(album_dir.glob("*.flac"))) == 1
+
+
+def test_drain_repairs_holds_when_archive_is_short(tmp_path, monkeypatch):
+    """Weedian's Trip to Florida: the page lists a track twice, the archive holds it once.
+    Without a hold the sweep would re-fetch the whole archive every day."""
+    from bandcampsync import freesync
+
+    config, state, _dir = _repair_env(tmp_path, have=1, num_tracks=3)
+
+    def partial(
+        album, spec, cfg, path, gmail, temp_dir=None, append_only=False, stats=None
+    ):
+        (path / "01.flac").write_text("new")
+        return ["01.flac"]
+
+    monkeypatch.setattr("bandcampsync.freedownload.repair_album", partial)
+    freesync.drain_repairs(config, state, None)
+
+    assert [e["kind"] for e in state.events] == ["repaired", "held"]
+    assert "2 of the 3" in state.repair_held[7]["reason"]
+
+
+def test_transient_repair_failure_stays_queued_then_holds(tmp_path, monkeypatch):
+    from bandcampsync import freesync
+
+    config, state, _dir = _repair_env(tmp_path)
+
+    def boom(*a, **k):
+        raise RuntimeError("curl (56)")
+
+    monkeypatch.setattr("bandcampsync.freedownload.repair_album", boom)
+    for _ in range(freesync.MAX_DOWNLOAD_ATTEMPTS - 1):
+        freesync.drain_repairs(config, state, None)
+        assert state.repairs == {7: "L"}
+    freesync.drain_repairs(config, state, None)
+    assert state.repairs == {}
+    assert 7 in state.repair_held
+
+
+def test_pending_only_run_drains_repairs_with_nothing_pending(tmp_path, monkeypatch):
+    """The sweep calls --pending-only; an empty pending queue must not skip repairs."""
+    from bandcampsync import freesync
+
+    config, state, _dir = _repair_env(tmp_path)
+    state.save()
+    calls = []
+    monkeypatch.setattr(
+        "bandcampsync.freedownload.repair_album",
+        lambda *a, **k: calls.append(1) or [],
+    )
+    freesync.do_free_sync(config, tmp_path / "s.json", pending_only=True)
+    assert calls == [1]
+    assert (tmp_path / "s.status.json").is_file()
+
+
+def test_status_file_lists_grown_held_and_events(tmp_path):
+    import json
+
+    from bandcampsync import freesync
+
+    state = freesync.FreeState(tmp_path / "state.json")
+    state.grown[1] = {"label": "L", "title": "A", "have": 1, "num_tracks": 9, "ts": 5}
+    state.hold(2, "L", _album(item_id=2, title="B", num_tracks=4), 3, "short")
+    state.record("repaired", "L", _album(item_id=3, title="C"), "added 2")
+    state.write_status()
+
+    status = json.loads((tmp_path / "state.status.json").read_text("utf-8"))
+    assert [g["item_id"] for g in status["grown"]] == [1]
+    assert status["held"][0]["reason"] == "short"
+    assert status["events"][0]["kind"] == "repaired"
+
+
+def test_state_round_trips_growth_fields(tmp_path):
+    from bandcampsync import freesync
+
+    state = freesync.FreeState(tmp_path / "s.json")
+    state.repairs[7] = "L"
+    state.grown[8] = {"label": "L"}
+    state.hold(9, "L", _album(item_id=9), 1, "r")
+    state.record("held", "L", _album(item_id=9), "r")
+    state.save()
+
+    again = freesync.FreeState(tmp_path / "s.json")
+    assert again.repairs == {7: "L"}
+    assert 8 in again.grown and 9 in again.repair_held
+    assert again.events[0]["item_id"] == 9
