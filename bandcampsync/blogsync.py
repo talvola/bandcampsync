@@ -391,9 +391,7 @@ def sync_post(
             # where it belongs in the collection but nothing would otherwise add it.
             artist, title = _display(item, album)
             log.info(f"Already have {artist} / {title} at {existing}")
-            results.append(
-                BlogResult(item, STATUS_HAVE, album=album, local_path=existing)
-            )
+            results.append(BlogResult(item, STATUS_HAVE, album=album, local_path=existing))
             state.queue(item, existing, album)
             continue
 
@@ -417,9 +415,7 @@ def sync_post(
             continue
 
         try:
-            local_path, size = download_item(
-                item, album, config, gmail_reader, temp_dir
-            )
+            local_path, size = download_item(item, album, config, gmail_reader, temp_dir)
         except Exception as e:
             artist, title = _display(item, album)
             log.error(f"Failed to download {artist} / {title}: {e}")
@@ -484,7 +480,7 @@ def format_report(post_url, results, pending_count=0):
     ]
     total = sum(r.bytes_downloaded for r in downloaded)
     if total:
-        lines.append(f"  Downloaded size: {total / (1024**3):.2f} GB")
+        lines.append(f"  Downloaded size: {total / (1024 ** 3):.2f} GB")
 
     if paid:
         lines += ["", "NO LONGER FREE (buy by hand, or skip):"]
