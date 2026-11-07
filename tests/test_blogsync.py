@@ -37,7 +37,12 @@ def embed(url, title, author, item_id, kind="album"):
 
 
 def test_extracts_url_artist_title_and_id_from_embed():
-    page = embed("https://ogierband.bandcamp.com/album/ogier", "Ogier, by Ogier", "Ogier", 3479528542)
+    page = embed(
+        "https://ogierband.bandcamp.com/album/ogier",
+        "Ogier, by Ogier",
+        "Ogier",
+        3479528542,
+    )
     items = extract_items(page)
     assert len(items) == 1
     assert items[0].item_id == 3479528542
@@ -59,7 +64,7 @@ def test_extracts_standalone_tracks_as_type_t():
 
 def test_ignores_embeds_without_a_release_id():
     # A bandcamp embed pointing at an artist page carries no album=/track= id.
-    attrs = '{&quot;url&quot;:&quot;https://a.bandcamp.com&quot;,&quot;embed_url&quot;:&quot;https://bandcamp.com/x&quot;}'
+    attrs = "{&quot;url&quot;:&quot;https://a.bandcamp.com&quot;,&quot;embed_url&quot;:&quot;https://bandcamp.com/x&quot;}"
     page = f'<div data-attrs="{attrs}" data-component-name="BandcampToDOM"></div>'
     assert extract_items(page) == []
 
@@ -148,7 +153,9 @@ def test_local_index_matches_on_item_id_whatever_the_directory_is_called(tmp_pat
 def test_local_index_matches_by_name_when_no_id_file(tmp_path):
     album_dir(tmp_path, "Bongripper - Live in Leipzeg")
     index = LocalIndex(tmp_path)
-    item = BlogItem(1, "a", "https://a.bandcamp.com/album/x", "Live in Leipzeg", "Bongripper")
+    item = BlogItem(
+        1, "a", "https://a.bandcamp.com/album/x", "Live in Leipzeg", "Bongripper"
+    )
     assert index.find(item) is not None
 
 
@@ -156,7 +163,13 @@ def test_local_index_finds_albums_inside_label_directories(tmp_path):
     # The blog's albums sit at the root AND inside label dirs; both must be seen.
     album_dir(tmp_path / "The Swamp Records", "Cripta Blue - Chaos at the Shangri La")
     index = LocalIndex(tmp_path)
-    item = BlogItem(1, "a", "https://a.bandcamp.com/album/x", "Chaos at the Shangri La", "Cripta Blue")
+    item = BlogItem(
+        1,
+        "a",
+        "https://a.bandcamp.com/album/x",
+        "Chaos at the Shangri La",
+        "Cripta Blue",
+    )
     found = index.find(item)
     assert found is not None and found.parent.name == "The Swamp Records"
 
@@ -164,7 +177,9 @@ def test_local_index_finds_albums_inside_label_directories(tmp_path):
 def test_local_index_ignores_case_and_punctuation(tmp_path):
     album_dir(tmp_path, "BLACK SUN VOID - Funeral Sun!")
     index = LocalIndex(tmp_path)
-    item = BlogItem(1, "a", "https://a.bandcamp.com/album/x", "Funeral Sun", "Black sun Void")
+    item = BlogItem(
+        1, "a", "https://a.bandcamp.com/album/x", "Funeral Sun", "Black sun Void"
+    )
     assert index.find(item) is not None
 
 
@@ -173,6 +188,23 @@ def test_local_index_does_not_invent_a_match(tmp_path):
     index = LocalIndex(tmp_path)
     item = BlogItem(1, "a", "https://a.bandcamp.com/album/x", "Cerium", "The Moondig")
     assert index.find(item) is None
+
+
+def test_local_index_self_titled_album_does_not_match_another_release(tmp_path):
+    # artist == title, so the artist's name alone used to satisfy the title check.
+    album_dir(tmp_path, "METY HEAVAL - Off the Universe")
+    index = LocalIndex(tmp_path)
+    item = BlogItem(
+        1, "a", "https://a.bandcamp.com/album/x", "METY HEAVAL", "METY HEAVAL"
+    )
+    assert index.find(item) is None
+
+
+def test_local_index_self_titled_album_still_matches_itself(tmp_path):
+    album_dir(tmp_path, "Olbodull - Olbodull (Remastered)")
+    index = LocalIndex(tmp_path)
+    item = BlogItem(1, "a", "https://a.bandcamp.com/album/x", "Olbodull", "Olbodull")
+    assert index.find(item) is not None
 
 
 def test_local_index_survives_an_unreadable_id_file(tmp_path):
@@ -199,14 +231,18 @@ def test_sync_reports_paid_items_and_does_not_download_them(tmp_path, mocker):
     api = FakeAPI({1: details(price=5.0)})
     state = BlogState(path=tmp_path / "s.json")
 
-    results = sync_post("u", Config(tmp_path), state, api=api, index=LocalIndex(tmp_path))
+    results = sync_post(
+        "u", Config(tmp_path), state, api=api, index=LocalIndex(tmp_path)
+    )
 
     assert [r.status for r in results] == [STATUS_PAID]
     download.assert_not_called()
     assert state.pending == {}
 
 
-def test_sync_skips_the_download_but_still_queues_an_album_already_on_disk(tmp_path, mocker):
+def test_sync_skips_the_download_but_still_queues_an_album_already_on_disk(
+    tmp_path, mocker
+):
     album_dir(tmp_path, "A - T")
     page = embed("https://a.bandcamp.com/album/x", "T, by A", "A", 1)
     mocker.patch("bandcampsync.blogsync.fetch_post", return_value=page)
@@ -214,7 +250,9 @@ def test_sync_skips_the_download_but_still_queues_an_album_already_on_disk(tmp_p
     api = FakeAPI({1: details()})
     state = BlogState(path=tmp_path / "s.json")
 
-    results = sync_post("u", Config(tmp_path), state, api=api, index=LocalIndex(tmp_path))
+    results = sync_post(
+        "u", Config(tmp_path), state, api=api, index=LocalIndex(tmp_path)
+    )
 
     assert [r.status for r in results] == [STATUS_HAVE]
     download.assert_not_called()
@@ -231,7 +269,9 @@ def test_sync_downloads_a_free_missing_album_and_queues_it(tmp_path, mocker):
     api = FakeAPI({1: details()})
     state = BlogState(path=tmp_path / "s.json")
 
-    results = sync_post("u", Config(tmp_path), state, api=api, index=LocalIndex(tmp_path))
+    results = sync_post(
+        "u", Config(tmp_path), state, api=api, index=LocalIndex(tmp_path)
+    )
 
     assert [r.status for r in results] == [STATUS_DOWNLOADED]
     assert results[0].bytes_downloaded == 1234
@@ -246,7 +286,14 @@ def test_report_mode_downloads_nothing_and_writes_no_state(tmp_path, mocker):
     state_path = tmp_path / "s.json"
     state = BlogState(path=state_path)
 
-    sync_post("u", Config(tmp_path), state, report_only=True, api=api, index=LocalIndex(tmp_path))
+    sync_post(
+        "u",
+        Config(tmp_path),
+        state,
+        report_only=True,
+        api=api,
+        index=LocalIndex(tmp_path),
+    )
 
     download.assert_not_called()
     assert not state_path.exists()
@@ -264,7 +311,9 @@ def test_a_failed_download_does_not_stop_the_rest(tmp_path, mocker):
     api = FakeAPI({1: details(), 2: details()})
     state = BlogState(path=tmp_path / "s.json")
 
-    results = sync_post("u", Config(tmp_path), state, api=api, index=LocalIndex(tmp_path))
+    results = sync_post(
+        "u", Config(tmp_path), state, api=api, index=LocalIndex(tmp_path)
+    )
 
     assert [r.status for r in results] == [STATUS_ERROR, STATUS_DOWNLOADED]
     assert 1 not in state.pending and 2 in state.pending
@@ -307,7 +356,10 @@ def test_strips_by_suffix_when_author_transliteration_differs():
         "Nosferator",
         154633428,
     )
-    assert extract_items(page)[0].title == "\u0421\u043c\u043e\u0443\u043a \u0421\u0430\u043a\u0438\u043d \u0424\u0440\u0438\u043a"
+    assert (
+        extract_items(page)[0].title
+        == "\u0421\u043c\u043e\u0443\u043a \u0421\u0430\u043a\u0438\u043d \u0424\u0440\u0438\u043a"
+    )
 
 
 def test_keeps_a_title_that_is_only_a_by_clause():
@@ -321,11 +373,21 @@ def test_report_prefers_bandcamps_names_over_the_blogs():
     from bandcampsync.labels import FreeAlbum
 
     album = FreeAlbum(
-        item_id=1, title="Real Title", artist="Real Artist", url="u", price=0.0,
-        is_set_price=False, require_email=False, free_download=False, num_tracks=3,
+        item_id=1,
+        title="Real Title",
+        artist="Real Artist",
+        url="u",
+        price=0.0,
+        is_set_price=False,
+        require_email=False,
+        free_download=False,
+        num_tracks=3,
     )
-    result = BlogResult(BlogItem(1, "a", "u", "Blog Title", "Blog Artist"),
-                        STATUS_DOWNLOADED, album=album)
+    result = BlogResult(
+        BlogItem(1, "a", "u", "Blog Title", "Blog Artist"),
+        STATUS_DOWNLOADED,
+        album=album,
+    )
     text = format_report("post", [result])
     assert "Real Artist / Real Title" in text
     assert "Blog Artist" not in text
