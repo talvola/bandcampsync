@@ -41,6 +41,12 @@ if __name__ == '__main__':
         help='Re-fetch one album and add only the files missing from its local directory. '
              'For albums a label extended after the original download; bandcamp does not '
              'allow fetching individual tracks of a compilation.')
+    parser.add_argument('--hold', type=int, default=0, metavar='ITEM_ID',
+        help='Park a GROWN album at its current track count: stops it being reported as '
+             'needing attention (or auto-repaired) until the label changes its track '
+             'count again. For known false positives. Give the reason with --reason.')
+    parser.add_argument('--reason', default='held by hand',
+        help='Why an album is held (shown in reports and the morning report)')
     parser.add_argument('--pending-only', action='store_true',
         help='Download the already-queued backlog without re-scanning any label. Use for '
              'repeated bounded runs after an initial scan.')
@@ -110,6 +116,12 @@ if __name__ == '__main__':
     if args.check_duplicates:
         from bandcampsync.freesync import report_duplicates
         report_duplicates(config, only_labels=only_labels)
+        sys.exit(0)
+
+    if args.hold:
+        from bandcampsync.freesync import do_hold
+        do_hold(state_path, args.hold, args.reason,
+                label=args.label[0] if args.label else '')
         sys.exit(0)
 
     if args.repair:

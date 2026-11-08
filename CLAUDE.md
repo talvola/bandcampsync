@@ -343,8 +343,28 @@ post-punk/goth list gave 1 usable label, because commercial vinyl labels sell th
   be told apart by rule.
 - `watch_growth: true` — **not a selection rule**; it never decides what is wanted. Re-checks
   already-downloaded releases for tracks the label added later and reports them as `GROWN`
-  with a `--repair ITEM_ID` line. Never queues: repair re-fetches a whole archive, so it stays
-  manual. **`--repair` only works when the label APPENDED tracks.** Filenames embed the track
+  with a `--repair ITEM_ID` line. On its own it never queues: a repair re-fetches the whole
+  archive, so it stays manual.
+  **`auto_repair: true` (requires `watch_growth`, PRF only since 2026-11-03)** makes the sweep
+  do the top-up itself. The scan queues `REPAIRING` items in `state.repairs`, and
+  `--pending-only` drains them after new releases, sharing the same `--max-gb`. It runs
+  `extract_missing(append_only=True)`: files are only added, never overwritten or deleted.
+  If any local track is missing from the archive, or the add-count guard trips, it raises
+  `RepairRefused`, writes nothing and HOLDS the album (`state.repair_held`, status `HELD`).
+  A held album is not retried until the label's track count changes, because each retry
+  costs a whole archive. A repair that leaves the album short is held as well (Trip to
+  Florida case), as is one that fails 3 times. `--hold ITEM_ID -l LABEL --reason ...` parks
+  a known false positive by hand.
+  **Why it exists: GROWN was reported but never seen.** October 2026: Pavement sat at 1 of
+  18 tracks for three weeks. The sweep only kept a report and logged a summary line when
+  something was WANTED, and the morning report only tailed `sweep.log`.
+  **Visibility now comes from `state.status.json`** (written by `FreeState.write_status` at
+  the end of each run), which `C:\projects\morning-report\daily_report.py` reads. Manual
+  `GROWN` items are listed under *Needs attention* every day until repaired or held.
+  `held`/`failed` events show there for 26 h. Downloads and top-ups get their own
+  section. `sweep.log` also prints `REPAIRING=`/`GROWN=`/`held=`, plus one `ATTENTION:`
+  line per GROWN album.
+  **`--repair` only works when the label APPENDED tracks.** Filenames embed the track
   number (`<Artist> - <Album> - NN <Track>.flac`), so tracks *inserted* at the top renumber
   everything and no local name matches the archive; `extract_missing` then refuses with
   "would add 44 files but only 10 were expected", which is the guard working, not a bug — it

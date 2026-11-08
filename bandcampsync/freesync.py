@@ -44,6 +44,9 @@ RECHECK_DAYS = 90
 EMPTY_RECHECK_HOURS = 12
 # Give up on an album after this many consecutive failed download attempts.
 MAX_DOWNLOAD_ATTEMPTS = 3
+# How long FreeState.events keeps outcomes for the morning report, and a hard cap.
+EVENT_KEEP_DAYS = 14
+EVENT_KEEP_MAX = 500
 
 STATUS_DOWNLOADED = "downloaded"
 STATUS_WANTED = "wanted"
@@ -54,12 +57,22 @@ STATUS_ERROR = "error"
 # safe. Resolved by writing bandcamp_item_id.txt files.
 STATUS_AMBIGUOUS = "ambiguous"
 # Downloaded, but the local directory holds fewer audio files than the label now lists
-# tracks: a release that grew after it was fetched. Only ever reported, never queued -
-# topping one up is `--repair ITEM_ID`, which is a deliberate manual step.
+# tracks: a release that grew after it was fetched. On a label without auto_repair it is
+# only reported - topping one up is `--repair ITEM_ID`, a deliberate manual step - and it
+# stays in FreeState.grown, which the morning report lists as needing attention.
 STATUS_GROWN = "grown"
+# Grown, on an auto_repair label: queued in FreeState.repairs for the download phase,
+# which appends the new tracks (see drain_repairs).
+STATUS_REPAIRING = "repairing"
+# Grown, but a repair was refused or came up short at this same track count, so it is not
+# retried - every attempt re-fetches the whole archive. Released automatically when the
+# label's track count changes. Set by drain_repairs or by hand with --hold.
+STATUS_HELD = "held"
 ALL_STATUSES = (
     STATUS_WANTED,
+    STATUS_REPAIRING,
     STATUS_GROWN,
+    STATUS_HELD,
     STATUS_DOWNLOADED,
     STATUS_AMBIGUOUS,
     STATUS_NOT_FREE,
@@ -131,6 +144,15 @@ class FreeState:
         # has been used up looks exactly like this. Those cannot be told apart from a
         # transient fault on a single attempt, so count attempts and give up eventually.
         self.failures = {}
+        # watch_growth bookkeeping, all keyed by item id. repairs is the auto_repair queue
+        # (id -> label), drained like pending. repair_held and grown hold dicts describing
+        # the album; see STATUS_HELD / STATUS_GROWN.
+        self.repairs = {}
+        self.repair_held = {}
+        self.grown = {}
+        # Recent outcomes (downloaded / repaired / held / failed), newest last, for the
+        # morning report. Pruned to EVENT_KEEP_DAYS.
+        self.events = []
         self.load()
 
     def load(self):
@@ -150,6 +172,10 @@ class FreeState:
         self.pending = self._int_keyed(data.get("pending"), "pending")
         self.skipped = self._int_keyed(data.get("skipped"), "skipped")
         self.failures = self._int_keyed(data.get("failures"), "failures")
+        self.repairs = self._int_keyed(data.get("repairs"), "repairs")
+        self.repair_held = self._int_keyed(data.get("repair_held"), "repair_held")
+        self.grown = self._int_keyed(data.get("grown"), "grown")
+        self.events = list(data.get("events") or [])
         log.info(
             f"Loaded state: {len(self.labels)} labels, {len(self.items)} cached albums, "
             f"{len(self.pending)} pending, {len(self.skipped)} skipped from {self.path}"
@@ -184,6 +210,10 @@ class FreeState:
                         "pending": {str(k): v for k, v in self.pending.items()},
                         "skipped": {str(k): v for k, v in self.skipped.items()},
                         "failures": {str(k): v for k, v in self.failures.items()},
+                        "repairs": {str(k): v for k, v in self.repairs.items()},
+                        "repair_held": {str(k): v for k, v in self.repair_held.items()},
+                        "grown": {str(k): v for k, v in self.grown.items()},
+                        "events": self.events,
                     },
                     indent=1,
                     sort_keys=True,
@@ -191,6 +221,68 @@ class FreeState:
             )
         tmp.replace(self.path)
         log.info(f"Wrote state to {self.path}")
+
+    def record(self, kind, label, album, detail=""):
+        """Append an outcome to the event log the morning report reads."""
+        self.events.append(
+            {
+                "ts": int(time.time()),
+                "kind": kind,
+                "label": label,
+                "item_id": getattr(album, "item_id", None),
+                "title": getattr(album, "title", "") or "",
+                "detail": detail,
+            }
+        )
+        horizon = time.time() - EVENT_KEEP_DAYS * 86400
+        self.events = [e for e in self.events if e.get("ts", 0) >= horizon][
+            -EVENT_KEEP_MAX:
+        ]
+
+    def hold(self, item_id, label, album, have, reason):
+        """Stop auto-repairing an album at its current track count, and say why."""
+        self.repairs.pop(item_id, None)
+        self.grown.pop(item_id, None)
+        self.repair_held[item_id] = {
+            "label": label,
+            "title": getattr(album, "title", "") or "",
+            "num_tracks": getattr(album, "num_tracks", 0),
+            "have": have,
+            "reason": reason,
+            "ts": int(time.time()),
+        }
+
+    @property
+    def status_path(self):
+        return self.path.with_name(self.path.stem + ".status.json")
+
+    def write_status(self):
+        """Write the small summary the morning report reads (C:\\projects\\morning-report).
+
+        Separate from state.json - which is megabytes of classification cache - so that
+        consumer depends on a short, stable shape rather than on scan internals. Written
+        at the end of each run, not on every save().
+        """
+
+        def rows(mapping):
+            return [
+                {"item_id": k, **v}
+                for k, v in sorted(mapping.items(), key=lambda kv: kv[1].get("ts", 0))
+            ]
+
+        status = {
+            "generated": datetime.now().isoformat(timespec="seconds"),
+            # Growth on a label without auto_repair: always needs a human.
+            "grown": rows(self.grown),
+            # Repairs refused or incomplete; the event log says when each happened.
+            "held": rows(self.repair_held),
+            "pending": len(self.pending),
+            "repairs_queued": len(self.repairs),
+            "events": self.events,
+        }
+        tmp = self.status_path.with_suffix(".tmp")
+        tmp.write_text(json.dumps(status, indent=1, ensure_ascii=False), "utf-8")
+        tmp.replace(self.status_path)
 
     def label(self, name):
         return self.labels.setdefault(name, {})
@@ -477,6 +569,34 @@ def resolve_cutoff(spec, state, index, full_scan):
     return None, "no local files to date from, examining everything"
 
 
+def _classify_growth(state, spec, album, have, grown_now):
+    """Decide what a grown album is: held, queued for auto-repair, or needing a human.
+
+    Returns the (album, status, detail) result tuple and updates the state queues.
+    """
+    item_id = album.item_id
+    detail = f"{have} local file(s), {album.num_tracks} tracks now listed"
+    held = state.repair_held.get(item_id)
+    if held and held.get("num_tracks") == album.num_tracks:
+        # Already tried (or deliberately parked) at exactly this track count. Retrying
+        # would re-fetch the whole archive daily for the same outcome.
+        state.repairs.pop(item_id, None)
+        state.grown.pop(item_id, None)
+        return album, STATUS_HELD, f"{detail}; held: {held.get('reason', '')}"
+    # Either never held, or the label has changed the release since: try again.
+    state.repair_held.pop(item_id, None)
+    if spec.match.get("auto_repair"):
+        state.repairs[item_id] = spec.name
+        state.grown.pop(item_id, None)
+        return album, STATUS_REPAIRING, detail
+    grown_now.add(item_id)
+    entry = state.grown.setdefault(item_id, {"ts": int(time.time())})
+    entry.update(
+        label=spec.name, title=album.title, have=have, num_tracks=album.num_tracks
+    )
+    return album, STATUS_GROWN, detail
+
+
 def scan_label(api, spec, state, media_dir, full_scan=False):
     """Scan one label.
 
@@ -526,6 +646,7 @@ def scan_label(api, spec, state, media_dir, full_scan=False):
 
     results = []
     errors = 0
+    grown_now = set()
     for entry in considered:
         item_id, item_type, title = entry.item_id, entry.item_type, entry.title
         cached = state.cached(item_id)
@@ -582,13 +703,13 @@ def scan_label(api, spec, state, media_dir, full_scan=False):
                 have = count_audio_files(index.dir / local)
                 if have is not None and have < album.num_tracks:
                     results.append(
-                        (
-                            album,
-                            STATUS_GROWN,
-                            f"{have} local file(s), {album.num_tracks} tracks now listed",
-                        )
+                        _classify_growth(state, spec, album, have, grown_now)
                     )
                     continue
+            # Complete (or not watched): nothing about its growth is outstanding.
+            state.repairs.pop(album.item_id, None)
+            state.repair_held.pop(album.item_id, None)
+            state.grown.pop(album.item_id, None)
             results.append((album, STATUS_DOWNLOADED, local))
             continue
         if ambiguous:
@@ -618,6 +739,15 @@ def scan_label(api, spec, state, media_dir, full_scan=False):
             f"so the next run re-examines the full catalogue"
         )
     else:
+        # Forget growth this label no longer shows (delisted, or the directory moved
+        # away); otherwise it would sit in the morning report's attention list forever.
+        # Only on a clean scan, so a failed lookup cannot clear a real entry.
+        for stale in [
+            iid
+            for iid, g in state.grown.items()
+            if g.get("label") == spec.name and iid not in grown_now
+        ]:
+            state.grown.pop(stale, None)
         state.label(spec.name)["first_scan_done"] = True
         # Record how far we got, so the next run only examines newer releases. Only on a
         # clean scan: recording it after failures would skip whatever was missed.
@@ -705,6 +835,14 @@ def print_report(all_results, output=None, meta=None):
                     output,
                 )
                 continue
+            if status == STATUS_REPAIRING:
+                _safe_print(f"  REPAIRING {album.artist} - {album.title}", output)
+                _safe_print(f"          {detail}; auto_repair queued", output)
+                continue
+            if status == STATUS_HELD:
+                _safe_print(f"  HELD {album.artist} - {album.title}", output)
+                _safe_print(f"          {detail}", output)
+                continue
             if status != STATUS_WANTED:
                 continue
             email = " [needs email]" if getattr(album, "require_email", False) else ""
@@ -772,6 +910,7 @@ def generate_free_report(config, state_path, full_scan=False, only_labels=None):
     state = FreeState(state_path)
     all_results, all_meta = scan_all(config, state, full_scan, only_labels)
     print_report(all_results, meta=all_meta)
+    state.write_status()
     return all_results
 
 
@@ -933,21 +1072,149 @@ def pending_albums(config, state, api=None):
                 continue
             state.cache(album, album.is_free)
         else:
-            album = FreeAlbum(
-                item_id=item_id,
-                title=cached.get("title") or "",
-                artist=cached.get("artist") or "",
-                url=url,
-                price=cached.get("price") or 0.0,
-                is_set_price=False,
-                require_email=bool(cached.get("require_email")),
-                free_download=False,
-                num_tracks=int(cached.get("num_tracks") or 0),
-                item_type=cached.get("item_type") or "a",
-                label_name=label_name,
-            )
+            album = _album_from_cache(item_id, label_name, cached)
         out.append((label_name, album))
     return out
+
+
+def _album_from_cache(item_id, label_name, cached):
+    return FreeAlbum(
+        item_id=item_id,
+        title=cached.get("title") or "",
+        artist=cached.get("artist") or "",
+        url=cached.get("url") or "",
+        price=cached.get("price") or 0.0,
+        is_set_price=False,
+        require_email=bool(cached.get("require_email")),
+        free_download=False,
+        num_tracks=int(cached.get("num_tracks") or 0),
+        item_type=cached.get("item_type") or "a",
+        label_name=label_name,
+    )
+
+
+def drain_repairs(config, state, get_gmail_reader, temp_dir=None, budget=None, spent=0):
+    """Top up every album in state.repairs, appending tracks and nothing else.
+
+    Unattended, so stricter than a manual --repair: extract_missing runs append_only, and
+    every way this can go other than "the new tracks were added" ends in state.hold() with
+    a reason and a "held" event, which the morning report surfaces. Held albums are not
+    retried until the label's track count changes - each attempt costs a whole archive.
+
+    Returns (results, spent) where results is a list of (album, added_or_None, error).
+    """
+    from .freedownload import RepairRefused, repair_album
+
+    specs = {spec.name: spec for spec in config.labels}
+    indexes = {}
+    results = []
+    for item_id, label_name in sorted(state.repairs.items()):
+        if budget and spent >= budget:
+            log.warning("Reached the download budget; remaining repairs stay queued")
+            break
+        spec = specs.get(label_name)
+        if spec is None or not spec.match.get("auto_repair"):
+            # auto_repair was switched off since the scan queued it.
+            state.repairs.pop(item_id, None)
+            continue
+        album = _album_from_cache(item_id, label_name, state.items.get(item_id) or {})
+        if label_name not in indexes:
+            indexes[label_name] = LabelIndex(config.media_dir, label_name)
+        index = indexes[label_name]
+        local, ambiguous = index.find(album)
+        if not local or ambiguous:
+            reason = (
+                "several local directories match; write bandcamp_item_id.txt files"
+                if ambiguous
+                else "local directory not found"
+            )
+            state.hold(item_id, label_name, album, None, reason)
+            state.record("held", label_name, album, reason)
+            state.save()
+            results.append((album, None, reason))
+            continue
+        path = index.dir / local
+        before = count_audio_files(path)
+        stats = {}
+        try:
+            added = repair_album(
+                album,
+                spec,
+                config,
+                path,
+                get_gmail_reader,
+                temp_dir=temp_dir,
+                append_only=True,
+                stats=stats,
+            )
+        except RepairRefused as e:
+            log.warning(f'Auto-repair of "{album.title}" refused: {e}')
+            spent += stats.get("bytes") or 0
+            state.hold(item_id, label_name, album, before, str(e)[:300])
+            state.record("held", label_name, album, str(e)[:300])
+            state.save()
+            results.append((album, None, str(e)))
+            continue
+        except Exception as e:
+            # Transient (network, Gmail slow): stays queued, but not forever.
+            attempts = state.failures.get(item_id, 0) + 1
+            state.failures[item_id] = attempts
+            log.error(
+                f'Auto-repair of "{album.title}" failed (attempt {attempts}): {e}'
+            )
+            if attempts >= MAX_DOWNLOAD_ATTEMPTS:
+                state.failures.pop(item_id, None)
+                reason = f"repair failed {attempts} times: {str(e)[:200]}"
+                state.hold(item_id, label_name, album, before, reason)
+                state.record("held", label_name, album, reason)
+            state.save()
+            results.append((album, None, str(e)))
+            continue
+
+        spent += stats.get("bytes") or 0
+        have = count_audio_files(path)
+        state.repairs.pop(item_id, None)
+        state.failures.pop(item_id, None)
+        state.record(
+            "repaired",
+            label_name,
+            album,
+            f"added {len(added)} file(s); {have} of {album.num_tracks} tracks",
+        )
+        log.info(
+            f'Auto-repaired "{album.title}": added {len(added)} file(s), now {have} '
+            f"of {album.num_tracks} tracks"
+        )
+        if have is not None and have < album.num_tracks:
+            # The archive itself is short of what the page lists (Weedian's Trip to
+            # Florida lists one track twice). Re-fetching tomorrow would change nothing.
+            reason = (
+                f"archive holds {have} of the {album.num_tracks} tracks the page lists"
+            )
+            state.hold(item_id, label_name, album, have, reason)
+            state.record("held", label_name, album, reason)
+        state.save()
+        results.append((album, added, None))
+    return results, spent
+
+
+def do_hold(state_path, item_id, reason, label=""):
+    """Park a grown album at its current track count (silences GROWN / auto-repair).
+
+    For a GROWN that is a known false positive rather than real growth. Released by the
+    next scan that sees a different track count.
+    """
+    state = FreeState(state_path)
+    cached = state.items.get(item_id)
+    if not cached:
+        raise ValueError(f"Item {item_id} is not in the scan state")
+    grown = state.grown.get(item_id) or {}
+    label = label or grown.get("label") or state.repairs.get(item_id) or ""
+    album = _album_from_cache(item_id, label, cached)
+    state.hold(item_id, label, album, grown.get("have"), reason)
+    state.save()
+    state.write_status()
+    log.info(f'Held "{album.title}" at {album.num_tracks} tracks: {reason}')
 
 
 def do_repair(
@@ -1048,6 +1315,13 @@ def do_repair(
             log.info(f"  {name}")
     else:
         log.info("Nothing was missing; no files added")
+    # A manual repair settles whatever the sweep had outstanding for this album.
+    state.grown.pop(item_id, None)
+    state.repairs.pop(item_id, None)
+    state.repair_held.pop(item_id, None)
+    state.record("repaired", label_name, album, f"manual: added {len(added)} file(s)")
+    state.save()
+    state.write_status()
     return added
 
 
@@ -1084,8 +1358,9 @@ def do_free_sync(
             for album, status, _detail in results
             if status == STATUS_WANTED
         ]
-    if not wanted:
+    if not wanted and not state.repairs:
         log.info("Nothing to download")
+        state.write_status()
         return []
     if limit:
         if len(wanted) > limit:
@@ -1157,6 +1432,7 @@ def do_free_sync(
                 state.skipped[album.item_id] = message[:200]
                 state.pending.pop(album.item_id, None)
                 state.failures.pop(album.item_id, None)
+                state.record("failed", label_name, album, message[:200])
             # Save either way: the attempt count has to survive the run, or a repeatedly
             # failing album is retried forever because every run starts it back at one.
             state.save()
@@ -1176,6 +1452,7 @@ def do_free_sync(
         downloaded_bytes += size
         state.pending.pop(album.item_id, None)
         state.failures.pop(album.item_id, None)
+        state.record("downloaded", label_name, album, Path(path).name)
         state.save()
         done.append((album, path, None))
         log.info(f'Downloaded "{album.title}" -> {path} ({size / 1024**3:.2f} GB)')
@@ -1184,4 +1461,19 @@ def do_free_sync(
     log.info(
         f"Downloaded {ok}/{len(done)} albums, {downloaded_bytes / 1024**3:.2f} GB total"
     )
+
+    # Grown albums on auto_repair labels, after new releases and within the same budget.
+    if state.repairs and not (budget and downloaded_bytes >= budget):
+        log.info(f"Auto-repairing {len(state.repairs)} grown album(s)")
+        repaired, downloaded_bytes = drain_repairs(
+            config,
+            state,
+            get_gmail_reader,
+            temp_dir=temp_dir,
+            budget=budget,
+            spent=downloaded_bytes,
+        )
+        fixed = sum(1 for _a, added, _e in repaired if added is not None)
+        log.info(f"Auto-repaired {fixed}/{len(repaired)} album(s)")
+    state.write_status()
     return done

@@ -61,6 +61,10 @@ VALID_RULES = {
     # scan to keep checking already-downloaded releases for tracks added after the
     # download, and report them. See STATUS_GROWN.
     "watch_growth",
+    # Also not a selection rule. With watch_growth, top up a grown release automatically
+    # instead of only reporting it - but only when the growth is a pure append. Anything
+    # else is held and reported. See freesync.drain_repairs.
+    "auto_repair",
 }
 
 
@@ -132,6 +136,11 @@ def _validate_match(rules, label_name):
             raise ConfigError(
                 f'Label "{label_name}" has an invalid title_regex: {e}'
             ) from e
+    if rules.get("auto_repair") and not rules.get("watch_growth"):
+        raise ConfigError(
+            f'Label "{label_name}" sets auto_repair without watch_growth; growth is '
+            f"only detected on watch_growth labels, so auto_repair would never fire"
+        )
     return dict(rules)
 
 
