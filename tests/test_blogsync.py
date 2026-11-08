@@ -175,6 +175,21 @@ def test_local_index_does_not_invent_a_match(tmp_path):
     assert index.find(item) is None
 
 
+def test_local_index_self_titled_album_does_not_match_another_release(tmp_path):
+    # artist == title, so the artist's name alone used to satisfy the title check.
+    album_dir(tmp_path, "METY HEAVAL - Off the Universe")
+    index = LocalIndex(tmp_path)
+    item = BlogItem(1, "a", "https://a.bandcamp.com/album/x", "METY HEAVAL", "METY HEAVAL")
+    assert index.find(item) is None
+
+
+def test_local_index_self_titled_album_still_matches_itself(tmp_path):
+    album_dir(tmp_path, "Olbodull - Olbodull (Remastered)")
+    index = LocalIndex(tmp_path)
+    item = BlogItem(1, "a", "https://a.bandcamp.com/album/x", "Olbodull", "Olbodull")
+    assert index.find(item) is not None
+
+
 def test_local_index_survives_an_unreadable_id_file(tmp_path):
     d = album_dir(tmp_path, "A - B")
     (d / LocalMedia.ITEM_INDEX_FILENAME).write_text("None", encoding="utf-8")

@@ -289,8 +289,12 @@ class LocalIndex:
             for key in (_norm(f"{raw_artist} - {raw_title}"), artist + title):
                 if key in self.by_name:
                     return self.by_name[key]
+            # The title must appear OUTSIDE the artist's own span: for a self-titled
+            # album (artist == title) a bare "title in key" is satisfied by the artist
+            # name alone, so any other release by that band matched (METY HEAVAL's
+            # self-titled LP matched its single "Off the Universe", Nov 2026).
             for key, path in self.by_name.items():
-                if artist in key and title in key:
+                if artist in key and title in key.replace(artist, "", 1):
                     return path
         return None
 
